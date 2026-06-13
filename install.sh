@@ -39,8 +39,7 @@ fi
 
 echo -e "${YELLOW}4. Đang cài đặt mã nguồn VPS Manager...${NC}"
 # Tạo thư mục và tải code từ Git
-# LƯU Ý: Hãy thay thế đường dẫn Git này bằng repository thực tế của bạn sau khi bạn đẩy code lên Git của bạn.
-GIT_REPO="https://github.com/YOUR_USERNAME/vps-manager.git"
+GIT_REPO="https://github.com/Phat-471/vps-manager.git"
 
 echo -e "Nhập link Git chứa code của bạn (Bấm Enter để dùng mặc định: $GIT_REPO):"
 read -r INPUT_REPO
