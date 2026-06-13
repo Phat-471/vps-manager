@@ -19,6 +19,7 @@ import Scheduler from './pages/Scheduler';
 import TrafficStats from './pages/TrafficStats';
 import Alerts from './pages/Alerts';
 import PHPConfig from './pages/PHPConfig';
+import NodeConfig from './pages/NodeConfig';
 import './index.css';
 
 const pageMap = {
@@ -33,6 +34,7 @@ const pageMap = {
   scheduler: <Scheduler />,
   alerts: <Alerts />,
   phpconfig: <PHPConfig />,
+  nodeconfig: <NodeConfig />,
   docker: <Docker />,
   terminal: <Terminal />,
   scripts: <Scripts />,

@@ -16,7 +16,8 @@ import {
   Clock,
   BarChart2,
   Bell,
-  Sliders
+  Sliders,
+  Zap
 } from 'lucide-react';
 
 const MENU_ITEMS = [
@@ -26,6 +27,7 @@ const MENU_ITEMS = [
   { id: 'webserver', label: 'Web Server', icon: Globe },
   { id: 'stats', label: 'Thống kê truy cập', icon: BarChart2 },
   { id: 'phpconfig', label: 'Cấu hình PHP', icon: Sliders },
+  { id: 'nodeconfig', label: 'Quản lý Node.js', icon: Zap },
   { id: 'mysql', label: 'Quản lý MySQL', icon: Database },
   { id: 'applications', label: 'Quản lý Ứng dụng', icon: Layers },
   { id: 'files', label: 'Quản lý File', icon: FolderOpen },

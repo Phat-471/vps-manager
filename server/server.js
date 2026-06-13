@@ -68,6 +68,7 @@ const backupRoutes = require('./routes/backup');
 const statsRoutes = require('./routes/stats');
 const alertsRoutes = require('./routes/alerts');
 const phpRoutes = require('./routes/php');
+const nodeRoutes = require('./routes/node');
 
 // API Routes (Tuyến đường mở cho Auth)
 app.use('/api/auth', authRoutes);
@@ -106,6 +107,7 @@ app.use('/api/backups', backupRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/alerts', alertsRoutes);
 app.use('/api/php', phpRoutes);
+app.use('/api/node', nodeRoutes);
 
 // Socket.IO for real-time features
 io.on('connection', (socket) => {
