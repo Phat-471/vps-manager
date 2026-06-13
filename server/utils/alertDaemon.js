@@ -63,33 +63,50 @@ function clearCooldown(vpsId, metric) {
  * Check a single VPS status
  */
 async function checkVPS(vpsId, threshold, channels) {
-    const config = {
-        host: threshold.host,
-        port: threshold.port || 22,
-        username: threshold.username,
-        password: AlertController.decrypt(threshold.password)
-    };
-
-    const ssh = new SSHConnection(config);
+    const isLocal = threshold.host === 'localhost' || threshold.host === '127.0.0.1' || threshold.host === '0.0.0.0';
+    let statsResult;
 
     try {
-        // 1. Check SSH connection
-        await ssh.connect();
+        if (isLocal) {
+            const { exec } = require('child_process');
+            const util = require('util');
+            const execPromise = util.promisify(exec);
+            
+            const { stdout, stderr } = await execPromise(`
+                top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'
+                free -m | grep Mem | awk '{print ($3/$2)*100}'
+                df -h / | tail -1 | awk '{print $5}' | tr -d '%'
+            `);
+            statsResult = { code: 0, stdout, stderr };
+            
+            // Local execution successful, clear downtime cooldown
+            clearCooldown(vpsId, 'downtime');
+        } else {
+            const config = {
+                host: threshold.host,
+                port: threshold.port || 22,
+                username: threshold.username,
+                password: AlertController.decrypt(threshold.password)
+            };
 
-        // Connection successful, clear downtime cooldown if any
-        clearCooldown(vpsId, 'downtime');
+            const ssh = new SSHConnection(config);
+            try {
+                // 1. Check SSH connection
+                await ssh.connect();
 
-        // 2. Fetch resource metrics
-        // CPU usage command: Top and awk to calculate percentage
-        // RAM usage command: free -m to get used/total ratio
-        // Disk usage command: df -h on root path
-        const statsResult = await ssh.executeCommand(`
-            top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'
-            free -m | grep Mem | awk '{print ($3/$2)*100}'
-            df -h / | tail -1 | awk '{print $5}' | tr -d '%'
-        `);
+                // Connection successful, clear downtime cooldown if any
+                clearCooldown(vpsId, 'downtime');
 
-        ssh.disconnect();
+                // 2. Fetch resource metrics
+                statsResult = await ssh.executeCommand(`
+                    top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'
+                    free -m | grep Mem | awk '{print ($3/$2)*100}'
+                    df -h / | tail -1 | awk '{print $5}' | tr -d '%'
+                `);
+            } finally {
+                ssh.disconnect();
+            }
+        }
 
         if (statsResult.code !== 0) {
             console.error(`Stats command failed on VPS ${threshold.host}:`, statsResult.stderr);
@@ -110,7 +127,7 @@ async function checkVPS(vpsId, threshold, channels) {
         if (!isNaN(cpuUsage) && cpuUsage > threshold.cpuLimit) {
             if (shouldAlert(vpsId, 'cpu')) {
                 const rawMsg = `⚠️ **[ALERT] QUÁ TẢI CPU**\n\n**Máy chủ:** ${threshold.host}\n**Sử dụng hiện tại:** ${cpuUsage.toFixed(1)}%\n**Ngưỡng giới hạn:** ${threshold.cpuLimit}%\n\nVui lòng kiểm tra lại các tiến trình đang hoạt động trên VPS.`;
-                const htmlMsg = `⚠️ <b>[ALERT] QUÁ TẢI CPU</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Sử dụng hiện tại:</b> ${cpuUsage.toFixed(1)}%\n<b>Ngưỡng giới hạn:</b> ${threshold.cpuLimit}%\n\nVui lòng kiểm tra lại các tiến trình đang hoạt động trên VPS.`;
+                const htmlMsg = `⚠️ <b>[ALERT] QUÁ TẢI CPU</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Sử dụng hiện tại:</b> ${cpuUsage.toFixed(1)}<b>Ngưỡng giới hạn:</b> ${threshold.cpuLimit}%\n\nVui lòng kiểm tra lại các tiến trình đang hoạt động trên VPS.`;
                 await dispatchAlert(channels, rawMsg, htmlMsg);
             }
         } else {
@@ -138,7 +155,6 @@ async function checkVPS(vpsId, threshold, channels) {
         }
 
     } catch (err) {
-        ssh.disconnect();
         console.error(`AlertDaemon error connecting to VPS ${threshold.host}:`, err.message);
 
         // 4. Handle downtime alerts
