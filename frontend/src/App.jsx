@@ -15,6 +15,7 @@ import Docker from './pages/Docker';
 import Terminal from './pages/Terminal';
 import Scripts from './pages/Scripts';
 import Maintenance from './pages/Maintenance';
+import Scheduler from './pages/Scheduler';
 import './index.css';
 
 const pageMap = {
@@ -29,6 +30,7 @@ const pageMap = {
   terminal: <Terminal />,
   scripts: <Scripts />,
   maintenance: <Maintenance />,
+  scheduler: <Scheduler />,
 };
 
 function AppShell() {

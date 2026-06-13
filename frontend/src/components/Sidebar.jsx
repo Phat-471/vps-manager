@@ -12,7 +12,8 @@ import {
   Layers, 
   TerminalSquare, 
   Play, 
-  LogOut 
+  LogOut,
+  Clock
 } from 'lucide-react';
 
 const MENU_ITEMS = [
@@ -24,6 +25,7 @@ const MENU_ITEMS = [
   { id: 'applications', label: 'Quản lý Ứng dụng', icon: Layers },
   { id: 'files', label: 'Quản lý File', icon: FolderOpen },
   { id: 'security', label: 'Bảo mật', icon: Shield },
+  { id: 'scheduler', label: 'Lập lịch & Sao lưu', icon: Clock },
   { id: 'docker', label: 'Docker', icon: Play },
   { id: 'terminal', label: 'Terminal (SSH)', icon: Terminal },
   { id: 'maintenance', label: 'Bảo trì hệ thống', icon: Wrench },
