@@ -13,7 +13,8 @@ import {
   Key, 
   Copy,
   Server,
-  BookOpen
+  BookOpen,
+  Save
 } from 'lucide-react';
 
 export default function MailConfig() {
@@ -46,6 +47,14 @@ export default function MailConfig() {
   const [dnsData, setDnsData] = useState(null);
   const [dnsLoading, setDnsLoading] = useState(false);
 
+  // SMTP Relay state
+  const [relayHost, setRelayHost] = useState('');
+  const [relayPort, setRelayPort] = useState('587');
+  const [relayUser, setRelayUser] = useState('');
+  const [relayPass, setRelayPass] = useState('');
+  const [relayLoading, setRelayLoading] = useState(false);
+  const [savingRelay, setSavingRelay] = useState(false);
+
   useEffect(() => {
     if (isConnected) {
       checkStatus();
@@ -59,9 +68,57 @@ export default function MailConfig() {
         loadMailboxes();
       } else if (activeTab === 'dns') {
         loadDNSInstructions();
+      } else if (activeTab === 'relay') {
+        loadRelayConfig();
       }
     }
   }, [activeTab, isConnected, status.installed]);
+
+  const loadRelayConfig = async () => {
+    setRelayLoading(true);
+    try {
+      const res = await apiCall('/api/mail/relay/get', 'POST');
+      if (res.success && res.data) {
+        let host = res.data.relayHost || '';
+        let port = '587';
+        if (host.includes('[')) {
+          const match = host.match(/\[(.*)\]:(\d+)/);
+          if (match) {
+            host = match[1];
+            port = match[2];
+          }
+        }
+        setRelayHost(host);
+        setRelayPort(port);
+        setRelayUser(res.data.relayUser || '');
+      }
+    } catch (err) {
+      showToast('Lỗi tải cấu hình SMTP Relay: ' + err.message, 'error');
+    } finally {
+      setRelayLoading(false);
+    }
+  };
+
+  const handleSaveRelay = async (e) => {
+    e.preventDefault();
+    setSavingRelay(true);
+    try {
+      const res = await apiCall('/api/mail/relay/save', 'POST', {
+        relayHost: relayHost.trim(),
+        relayPort: parseInt(relayPort),
+        relayUser: relayUser.trim(),
+        relayPass: relayPass.trim()
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        setRelayPass('');
+      }
+    } catch (err) {
+      showToast('Lỗi lưu cấu hình SMTP Relay: ' + err.message, 'error');
+    } finally {
+      setSavingRelay(false);
+    }
+  };
 
   const checkStatus = async () => {
     setLoading(true);
@@ -304,6 +361,16 @@ export default function MailConfig() {
               }`}
             >
               Cấu hình DNS (MX/SPF/DKIM)
+            </button>
+            <button 
+              onClick={() => setActiveTab('relay')}
+              className={`pb-3 px-4 text-sm font-semibold transition-all relative ${
+                activeTab === 'relay' 
+                  ? 'text-indigo-400 border-b-2 border-indigo-500' 
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Cấu hình SMTP Relay
             </button>
             <button 
               onClick={() => setActiveTab('instructions')}
@@ -636,6 +703,90 @@ export default function MailConfig() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* TAB 4: SMTP RELAY CONFIG */}
+          {activeTab === 'relay' && (
+            <div className="card-glass p-6 rounded-xl space-y-4 max-w-xl mx-auto">
+              <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="font-semibold text-lg flex items-center gap-2">
+                  <Server size={18} className="text-indigo-400" />
+                  Cấu hình Postfix SMTP Relay
+                </h3>
+              </div>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                SMTP Relay giúp chuyển tiếp các email gửi ra ngoài qua các nhà cung cấp như SendGrid, Mailgun, Amazon SES,... giúp gia tăng tỷ lệ vào inbox và giải quyết lỗi chặn Port 25 trên nhiều VPS.
+              </p>
+
+              {relayLoading ? (
+                <div className="py-12 text-center text-gray-400 text-xs">
+                  <RotateCw size={18} className="animate-spin mx-auto mb-2 text-indigo-500" />
+                  Đang tải cấu hình SMTP Relay...
+                </div>
+              ) : (
+                <form onSubmit={handleSaveRelay} className="space-y-4">
+                  <div className="form-group">
+                    <label className="text-xs text-gray-400">SMTP Server Host</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="vd: smtp.sendgrid.net hoặc smtp.mailgun.org"
+                      value={relayHost}
+                      onChange={e => setRelayHost(e.target.value)}
+                      className="input-glass"
+                      style={{ padding: '8px', fontSize: '12px' }}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="text-xs text-gray-400">SMTP Port</label>
+                    <input
+                      type="number"
+                      required
+                      placeholder="vd: 587, 465, 2525"
+                      value={relayPort}
+                      onChange={e => setRelayPort(e.target.value)}
+                      className="input-glass"
+                      style={{ padding: '8px', fontSize: '12px' }}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="text-xs text-gray-400">SMTP Username</label>
+                    <input
+                      type="text"
+                      placeholder="Tên tài khoản SMTP"
+                      value={relayUser}
+                      onChange={e => setRelayUser(e.target.value)}
+                      className="input-glass"
+                      style={{ padding: '8px', fontSize: '12px' }}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="text-xs text-gray-400">SMTP Password / API Key</label>
+                    <input
+                      type="password"
+                      placeholder="Mật khẩu hoặc API Key mới (để trống nếu giữ nguyên)"
+                      value={relayPass}
+                      onChange={e => setRelayPass(e.target.value)}
+                      className="input-glass"
+                      style={{ padding: '8px', fontSize: '12px' }}
+                    />
+                  </div>
+
+                  <button 
+                    type="submit" 
+                    disabled={savingRelay}
+                    className="btn btn-primary btn-block flex items-center justify-center gap-2"
+                    style={{ padding: '10px' }}
+                  >
+                    <Save size={16} />
+                    {savingRelay ? 'Đang lưu cấu hình...' : 'Lưu cấu hình & Áp dụng Relay'}
+                  </button>
+                </form>
+              )}
             </div>
           )}
         </div>

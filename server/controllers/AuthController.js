@@ -4,6 +4,33 @@ const crypto = require('crypto');
 const JWT_SECRET = crypto.randomBytes(32).toString('hex');
 
 /**
+ * Băm mật khẩu sử dụng thuật toán PBKDF2/scrypt an toàn tích hợp sẵn của Node.js
+ */
+function hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+    return `${salt}:${hash}`;
+}
+
+/**
+ * Kiểm tra mật khẩu có khớp với mã băm hay không
+ */
+function verifyPassword(password, storedPassword) {
+    if (!storedPassword) return false;
+    // Hỗ trợ tương thích ngược mật khẩu dạng text thường (nếu có)
+    if (!storedPassword.includes(':')) {
+        return password === storedPassword;
+    }
+    const [salt, hash] = storedPassword.split(':');
+    const verifyHash = crypto.scryptSync(password, salt, 64).toString('hex');
+    try {
+        return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(verifyHash, 'hex'));
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Tạo token đơn giản dựa trên crypto
  */
 function generateToken() {
@@ -71,7 +98,7 @@ function login(req, res) {
             return res.json({ success: true, message: 'Đăng nhập không yêu cầu mật khẩu', token: null });
         }
 
-        if (password === requiredPassword) {
+        if (verifyPassword(password, requiredPassword)) {
             const token = generateToken();
             return res.json({ success: true, token });
         } else {
@@ -99,6 +126,8 @@ function setup(req, res) {
             return res.status(400).json({ success: false, error: 'Mật khẩu phải tối thiểu từ 6 ký tự trở lên.' });
         }
 
+        const hashedPassword = hashPassword(password.trim());
+
         // Ghi mật khẩu vào file .env
         const envPath = path.join(__dirname, '../../.env');
         let envContent = '';
@@ -111,17 +140,17 @@ function setup(req, res) {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (line.startsWith('PANEL_PASSWORD=')) {
-                lines[i] = `PANEL_PASSWORD=${password.trim()}`;
+                lines[i] = `PANEL_PASSWORD=${hashedPassword}`;
                 found = true;
                 break;
             }
         }
         if (!found) {
-            lines.push(`PANEL_PASSWORD=${password.trim()}`);
+            lines.push(`PANEL_PASSWORD=${hashedPassword}`);
         }
         
         fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
-        process.env.PANEL_PASSWORD = password.trim();
+        process.env.PANEL_PASSWORD = hashedPassword;
 
         // Tạo token đăng nhập mới luôn cho phiên làm việc hiện tại
         const token = generateToken();

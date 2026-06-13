@@ -21,7 +21,13 @@ export default function WebServer() {
   const [loading, setLoading] = useState(false);
   
   // Tab control state
-  const [activeTab, setActiveTab] = useState('sites'); // 'sites' | 'dns' | 'hosts'
+  const [activeTab, setActiveTab] = useState('sites'); // 'sites' | 'ssl' | 'dns' | 'hosts'
+  
+  // SSL management state
+  const [sslCerts, setSslCerts] = useState([]);
+  const [loadingCerts, setLoadingCerts] = useState(false);
+  const [renewingAll, setRenewingAll] = useState(false);
+  const [settingCron, setSettingCron] = useState(false);
   
   // DNS Diagnostic state
   const [dnsDomain, setDnsDomain] = useState('');
@@ -98,6 +104,58 @@ export default function WebServer() {
       loadHosts();
     }
   }, [activeTab, isConnected]);
+
+  useEffect(() => {
+    if (isConnected && activeTab === 'ssl') {
+      loadSSLCerts();
+    }
+  }, [activeTab, isConnected]);
+
+  const loadSSLCerts = async () => {
+    setLoadingCerts(true);
+    try {
+      const result = await apiCall('/api/webserver/ssl/list', 'POST');
+      if (result.success) {
+        setSslCerts(result.data || []);
+      }
+    } catch (err) {
+      showToast('Không thể tải danh sách chứng chỉ SSL: ' + err.message, 'error');
+    } finally {
+      setLoadingCerts(false);
+    }
+  };
+
+  const handleRenewAllSSL = async () => {
+    if (!window.confirm('Bạn có muốn thực hiện gia hạn tất cả chứng chỉ SSL ngay lập tức không?')) return;
+    setRenewingAll(true);
+    showToast('Đang thực hiện yêu cầu gia hạn chứng chỉ SSL...', 'info');
+    try {
+      const result = await apiCall('/api/webserver/ssl/renew-all', 'POST');
+      if (result.success) {
+        showToast('Gia hạn SSL hoàn tất!', 'success');
+        loadSSLCerts();
+      }
+    } catch (err) {
+      showToast('Lỗi gia hạn SSL: ' + err.message, 'error');
+    } finally {
+      setRenewingAll(false);
+    }
+  };
+
+  const handleSetupCronSSL = async () => {
+    setSettingCron(true);
+    showToast('Đang thiết lập Cron Job tự động gia hạn...', 'info');
+    try {
+      const result = await apiCall('/api/webserver/ssl/setup-cron', 'POST');
+      if (result.success) {
+        showToast(result.message, 'success');
+      }
+    } catch (err) {
+      showToast('Lỗi thiết lập Cron Job: ' + err.message, 'error');
+    } finally {
+      setSettingCron(false);
+    }
+  };
 
   const loadHosts = async () => {
     setLoadingHosts(true);
@@ -283,6 +341,13 @@ export default function WebServer() {
           Danh sách Website
         </button>
         <button 
+          className={`db-tab-item ${activeTab === 'ssl' ? 'active' : ''}`}
+          onClick={() => setActiveTab('ssl')}
+        >
+          <ShieldCheck size={16} />
+          Quản lý SSL Let's Encrypt
+        </button>
+        <button 
           className={`db-tab-item ${activeTab === 'dns' ? 'active' : ''}`}
           onClick={() => setActiveTab('dns')}
         >
@@ -356,6 +421,98 @@ export default function WebServer() {
                             <Trash size={12} /> Xóa
                           </button>
                         </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: SSL Certificates */}
+      {activeTab === 'ssl' && (
+        <div className="card-glass p-6 rounded-xl space-y-6">
+          <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h3 className="font-semibold text-lg flex items-center gap-2">
+                <ShieldCheck size={18} className="text-green-400" />
+                Danh sách chứng chỉ SSL Let's Encrypt
+              </h3>
+              <p className="text-xs text-gray-400">Xem và quản lý tự động gia hạn các chứng chỉ SSL được cài đặt trên VPS của bạn.</p>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                className="btn btn-glass" 
+                onClick={handleSetupCronSSL} 
+                disabled={settingCron || loadingCerts}
+              >
+                {settingCron ? 'Đang cài đặt...' : 'Thiết lập tự động gia hạn (Cron)'}
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleRenewAllSSL} 
+                disabled={renewingAll || loadingCerts}
+              >
+                {renewingAll ? 'Đang gia hạn...' : 'Gia hạn tất cả ngay'}
+              </button>
+            </div>
+          </div>
+
+          {loadingCerts ? (
+            <div className="text-center py-12 text-gray-400 text-xs">
+              <RotateCw size={18} className="animate-spin mx-auto mb-2 text-green-500" />
+              Đang quét chứng chỉ SSL trên VPS...
+            </div>
+          ) : sslCerts.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 text-sm">
+              Chưa tìm thấy chứng chỉ SSL Let's Encrypt nào trên hệ thống VPS này.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="explorer-list-table">
+                <thead>
+                  <tr>
+                    <th>Tên chứng chỉ</th>
+                    <th>Tên miền được bảo vệ</th>
+                    <th>Ngày hết hạn</th>
+                    <th>Thời gian còn lại</th>
+                    <th style={{ textAlign: 'center' }}>Trạng thái</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sslCerts.map(cert => (
+                    <tr key={cert.name}>
+                      <td className="font-semibold text-gray-200">{cert.name}</td>
+                      <td>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {cert.domains.map(dom => (
+                            <code key={dom} className="bg-white/5 px-1.5 py-0.5 rounded text-[10px] text-indigo-300">{dom}</code>
+                          ))}
+                        </div>
+                      </td>
+                      <td>
+                        <span className="text-xs text-gray-300">{cert.expiryDate}</span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className={`text-xs font-bold ${cert.daysRemaining < 30 ? 'text-red-400' : 'text-green-400'}`}>
+                            {cert.daysRemaining} ngày
+                          </span>
+                          <div style={{ width: '80px', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                            <div style={{ 
+                              width: `${Math.min(100, (cert.daysRemaining / 90) * 100)}%`, 
+                              height: '100%', 
+                              background: cert.daysRemaining < 30 ? '#ef4444' : '#22c55e' 
+                            }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span className={`status-badge ${cert.valid ? 'success' : 'danger'}`}>
+                          {cert.valid ? 'Hợp lệ' : 'Hết hạn / Lỗi'}
+                        </span>
                       </td>
                     </tr>
                   ))}

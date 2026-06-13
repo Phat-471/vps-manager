@@ -1,5 +1,5 @@
 const { connectionPool } = require('../utils/ssh');
-const { escapeShellArg, sanitizeNumber, sanitizeProto } = require('../utils/security');
+const { escapeShellArg, sanitizeNumber, sanitizeProto, isValidIP } = require('../utils/security');
 
 async function getUFWStatus(req, res) {
     try {
@@ -327,13 +327,17 @@ async function blockIP(req, res) {
             return res.status(400).json({ success: false, error: 'Thiếu địa chỉ IP' });
         }
 
+        const cleanIP = ip.trim();
+        if (!isValidIP(cleanIP)) {
+            return res.status(400).json({ success: false, error: 'Địa chỉ IP không hợp lệ' });
+        }
+
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         
         // Đảm bảo UFW được bật
         await ssh.executeCommand('echo "y" | ufw enable');
         
         // Chèn luật chặn lên hàng đầu
-        const cleanIP = ip.trim();
         const result = await ssh.executeCommand(`ufw insert 1 deny from ${escapeShellArg(cleanIP)} to any`);
         
         if (result.code !== 0) {
@@ -357,8 +361,12 @@ async function unblockIP(req, res) {
             return res.status(400).json({ success: false, error: 'Thiếu địa chỉ IP cần gỡ chặn' });
         }
 
-        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         const cleanIP = ip.trim();
+        if (!isValidIP(cleanIP)) {
+            return res.status(400).json({ success: false, error: 'Địa chỉ IP không hợp lệ' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         
         const result = await ssh.executeCommand(`ufw delete deny from ${escapeShellArg(cleanIP)} to any`);
         

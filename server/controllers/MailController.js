@@ -385,11 +385,131 @@ async function deleteMailbox(req, res) {
     }
 }
 
+async function getSMTPRelayConfig(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const script = `
+            # Parse relayhost from main.cf
+            RELAY_HOST=""
+            if [ -f /etc/postfix/main.cf ]; then
+                RELAY_HOST=$(grep -E "^relayhost\\s*=" /etc/postfix/main.cf | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo "")
+            fi
+            
+            # Parse user from sasl_passwd
+            RELAY_USER=""
+            if [ -f /etc/postfix/sasl_passwd ]; then
+                # format: [smtp.sendgrid.net]:587 username:password
+                RELAY_USER=$(cat /etc/postfix/sasl_passwd | head -1 | awk '{print $2}' | awk -F: '{print $1}' || echo "")
+            fi
+
+            echo "RELAY_HOST:$RELAY_HOST"
+            echo "RELAY_USER:$RELAY_USER"
+        `;
+
+        const result = await ssh.executeCommand(script);
+        const lines = result.stdout.trim().split('\n');
+        
+        let relayHost = '';
+        let relayUser = '';
+
+        lines.forEach(line => {
+            if (line.startsWith('RELAY_HOST:')) {
+                relayHost = line.replace('RELAY_HOST:', '').trim();
+            } else if (line.startsWith('RELAY_USER:')) {
+                relayUser = line.replace('RELAY_USER:', '').trim();
+            }
+        });
+
+        res.json({
+            success: true,
+            data: {
+                relayHost,
+                relayUser
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function saveSMTPRelayConfig(req, res) {
+    try {
+        const { vpsConfig, relayHost, relayPort, relayUser, relayPass } = req.body;
+
+        if (!relayHost || !relayPort) {
+            return res.status(400).json({ success: false, error: 'Thiếu thông tin Host hoặc Port của SMTP Server.' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const hostVal = relayHost.trim();
+        const portVal = parseInt(relayPort);
+        const userVal = relayUser ? relayUser.trim() : '';
+        const passVal = relayPass ? relayPass.trim() : '';
+
+        const script = `
+            HOST="${hostVal}"
+            PORT="${portVal}"
+            USER="${userVal}"
+            PASS=${escapeShellArg(passVal)}
+
+            if [ ! -f /etc/postfix/main.cf ]; then
+                echo "ERROR_NOT_INSTALLED"
+                exit 1
+            fi
+
+            # Backup main.cf
+            cp /etc/postfix/main.cf /etc/postfix/main.cf.relay.bak 2>/dev/null || true
+
+            # Delete existing relay host configs from main.cf
+            sed -i '/^relayhost\\s*=/d' /etc/postfix/main.cf
+            sed -i '/^smtp_sasl_/d' /etc/postfix/main.cf
+            sed -i '/^smtp_tls_/d' /etc/postfix/main.cf
+
+            # Append new relay configurations
+            cat << EOF >> /etc/postfix/main.cf
+relayhost = [\$HOST]:\$PORT
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_tls_security_level = encrypt
+EOF
+
+            # Write credentials to sasl_passwd
+            echo "[\$HOST]:\$PORT \$USER:\$PASS" > /etc/postfix/sasl_passwd
+            chmod 600 /etc/postfix/sasl_passwd
+            
+            # Run postmap to generate the db lookup file
+            postmap /etc/postfix/sasl_passwd
+            
+            # Restart postfix
+            systemctl restart postfix
+            echo "SUCCESS"
+        `;
+
+        const result = await ssh.executeCommand(script);
+        if (result.stdout.includes('ERROR_NOT_INSTALLED')) {
+            return res.status(400).json({ success: false, error: 'Postfix chưa được cài đặt trên VPS này.' });
+        }
+        if (result.code !== 0 || !result.stdout.includes('SUCCESS')) {
+            return res.status(500).json({ success: false, error: 'Cấu hình SMTP Relay thất bại.', details: result.stderr || result.stdout });
+        }
+
+        res.json({ success: true, message: 'Đã lưu cấu hình và khởi chạy SMTP Relay thành công!' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getMailStatus,
     installMailServer,
     getDNSInstructions,
     listMailboxes,
     createMailbox,
-    deleteMailbox
+    deleteMailbox,
+    getSMTPRelayConfig,
+    saveSMTPRelayConfig
 };

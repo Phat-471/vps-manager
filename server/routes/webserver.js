@@ -16,4 +16,9 @@ router.post('/check-dns', WebServerController.checkDNS);
 router.post('/get-hosts', WebServerController.getHosts);
 router.post('/save-hosts', WebServerController.saveHosts);
 
+// SSL routes
+router.post('/ssl/list', WebServerController.listSSLCertificates);
+router.post('/ssl/renew-all', WebServerController.renewAllSSL);
+router.post('/ssl/setup-cron', WebServerController.setupSSLAutoRenewCron);
+
 module.exports = router;

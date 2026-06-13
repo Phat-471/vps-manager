@@ -332,12 +332,98 @@ async function saveHosts(req, res) {
         const { vpsConfig, content } = req.body;
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         
-        // Write content safely back to /etc/hosts
-        await ssh.executeCommand(`cat > /etc/hosts << 'EOF'
-${content}
-EOF`);
+        // Ghi cấu hình hosts an toàn qua SFTP thay vì command injection nguy hiểm
+        await ssh.writeFile('/etc/hosts', content);
         
         res.json({ success: true, message: 'Đã lưu cấu hình file Hosts thành công!' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function listSSLCertificates(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const result = await ssh.executeCommand('certbot certificates 2>/dev/null || echo "NO_CERTBOT"');
+        if (result.stdout.includes('NO_CERTBOT') || result.stdout.trim() === '') {
+            return res.json({ success: true, data: [] });
+        }
+
+        const certificates = [];
+        const lines = result.stdout.split('\n');
+        let currentCert = null;
+
+        for (let line of lines) {
+            line = line.trim();
+            if (line.startsWith('Certificate Name:')) {
+                if (currentCert) {
+                    certificates.push(currentCert);
+                }
+                currentCert = {
+                    name: line.replace('Certificate Name:', '').trim(),
+                    domains: [],
+                    expiryDate: '',
+                    daysRemaining: 0,
+                    valid: false
+                };
+            } else if (currentCert && line.startsWith('Domains:')) {
+                currentCert.domains = line.replace('Domains:', '').trim().split(/\s+/);
+            } else if (currentCert && line.startsWith('Expiry Date:')) {
+                const expiryPart = line.replace('Expiry Date:', '').trim();
+                currentCert.expiryDate = expiryPart.split('(')[0].trim();
+                currentCert.valid = expiryPart.includes('(valid)');
+
+                const daysMatch = expiryPart.match(/(\d+)\s+days/);
+                if (daysMatch) {
+                    currentCert.daysRemaining = parseInt(daysMatch[1]);
+                } else {
+                    const dateStr = currentCert.expiryDate.split(' ')[0];
+                    const expiry = new Date(dateStr);
+                    const now = new Date();
+                    const diffTime = expiry - now;
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    currentCert.daysRemaining = isNaN(diffDays) ? 0 : diffDays;
+                }
+            }
+        }
+
+        if (currentCert) {
+            certificates.push(currentCert);
+        }
+
+        res.json({ success: true, data: certificates });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function renewAllSSL(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const result = await ssh.executeCommand('certbot renew --post-hook "systemctl reload nginx"');
+        res.json({ success: true, data: result.stdout || result.stderr });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function setupSSLAutoRenewCron(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const cronCommand = "echo \"0 0 * * * root certbot renew --post-hook 'systemctl reload nginx' >/dev/null 2>&1\" > /etc/cron.d/certbot-renew-panel";
+        const result = await ssh.executeCommand(cronCommand);
+
+        if (result.code !== 0) {
+            throw new Error(result.stderr || 'Không thể tạo file cron job');
+        }
+
+        res.json({ success: true, message: 'Đã thiết lập Cron Job tự động gia hạn SSL Let\'s Encrypt thành công!' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -354,5 +440,8 @@ module.exports = {
     getNginxStatus,
     checkDNS,
     getHosts,
-    saveHosts
+    saveHosts,
+    listSSLCertificates,
+    renewAllSSL,
+    setupSSLAutoRenewCron
 };

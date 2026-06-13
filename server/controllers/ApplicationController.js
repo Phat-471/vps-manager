@@ -1,4 +1,5 @@
 const { connectionPool } = require('../utils/ssh');
+const { escapeShellArg, sanitizeAppName, sanitizeNumber } = require('../utils/security');
 
 /**
  * List PM2 applications
@@ -79,13 +80,17 @@ async function listApplications(req, res) {
 async function startApplication(req, res) {
     try {
         const { vpsConfig, appName } = req.body;
+        const safeAppName = sanitizeAppName(appName);
+        if (!safeAppName) {
+            return res.status(400).json({ success: false, error: 'Tên ứng dụng không hợp lệ' });
+        }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
-        const result = await ssh.executeCommand(`pm2 start ${appName}`);
+        const result = await ssh.executeCommand(`pm2 start ${escapeShellArg(safeAppName)}`);
 
         res.json({
             success: true,
-            message: `Đã khởi động ứng dụng ${appName}`,
+            message: `Đã khởi động ứng dụng ${safeAppName}`,
             output: result.stdout
         });
 
@@ -103,13 +108,17 @@ async function startApplication(req, res) {
 async function stopApplication(req, res) {
     try {
         const { vpsConfig, appName } = req.body;
+        const safeAppName = sanitizeAppName(appName);
+        if (!safeAppName) {
+            return res.status(400).json({ success: false, error: 'Tên ứng dụng không hợp lệ' });
+        }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
-        const result = await ssh.executeCommand(`pm2 stop ${appName}`);
+        const result = await ssh.executeCommand(`pm2 stop ${escapeShellArg(safeAppName)}`);
 
         res.json({
             success: true,
-            message: `Đã dừng ứng dụng ${appName}`,
+            message: `Đã dừng ứng dụng ${safeAppName}`,
             output: result.stdout
         });
 
@@ -127,13 +136,17 @@ async function stopApplication(req, res) {
 async function restartApplication(req, res) {
     try {
         const { vpsConfig, appName } = req.body;
+        const safeAppName = sanitizeAppName(appName);
+        if (!safeAppName) {
+            return res.status(400).json({ success: false, error: 'Tên ứng dụng không hợp lệ' });
+        }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
-        const result = await ssh.executeCommand(`pm2 restart ${appName}`);
+        const result = await ssh.executeCommand(`pm2 restart ${escapeShellArg(safeAppName)}`);
 
         res.json({
             success: true,
-            message: `Đã khởi động lại ứng dụng ${appName}`,
+            message: `Đã khởi động lại ứng dụng ${safeAppName}`,
             output: result.stdout
         });
 
@@ -151,13 +164,17 @@ async function restartApplication(req, res) {
 async function deleteApplication(req, res) {
     try {
         const { vpsConfig, appName } = req.body;
+        const safeAppName = sanitizeAppName(appName);
+        if (!safeAppName) {
+            return res.status(400).json({ success: false, error: 'Tên ứng dụng không hợp lệ' });
+        }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
-        const result = await ssh.executeCommand(`pm2 delete ${appName}`);
+        const result = await ssh.executeCommand(`pm2 delete ${escapeShellArg(safeAppName)}`);
 
         res.json({
             success: true,
-            message: `Đã xóa ứng dụng ${appName}`,
+            message: `Đã xóa ứng dụng ${safeAppName}`,
             output: result.stdout
         });
 
@@ -175,10 +192,14 @@ async function deleteApplication(req, res) {
 async function getApplicationLogs(req, res) {
     try {
         const { vpsConfig, appName, lines } = req.body;
-        const numLines = lines || 100;
+        const safeAppName = sanitizeAppName(appName);
+        if (!safeAppName) {
+            return res.status(400).json({ success: false, error: 'Tên ứng dụng không hợp lệ' });
+        }
+        const numLines = sanitizeNumber(lines) || 100;
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
-        const result = await ssh.executeCommand(`pm2 logs ${appName} --lines ${numLines} --nostream`);
+        const result = await ssh.executeCommand(`pm2 logs ${escapeShellArg(safeAppName)} --lines ${numLines} --nostream`);
 
         res.json({
             success: true,
@@ -217,21 +238,21 @@ async function createAppWizard(req, res) {
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
         // Step 1: Create directory
-        await ssh.executeCommand(`mkdir -p ${appPath}`);
+        await ssh.executeCommand(`mkdir -p ${escapeShellArg(appPath)}`);
 
         // Step 2: Generate files based on template
         const templates = {
             'express-api': {
                 serverJs: `const express = require('express');
 const app = express();
-const PORT = ${port};
+const PORT = ${portNum};
 
 app.use(express.json());
 
 app.get('/', (req, res) => {
   res.json({ 
     app: '${sanitizedAppName}',
-    description: '${description || 'API Server'}',
+    description: '${(description || 'API Server').replace(/'/g, "\\'")}',
     status: 'running',
     timestamp: new Date().toISOString()
   });
@@ -264,7 +285,7 @@ app.listen(PORT, '0.0.0.0', () => {
             'web-dashboard': {
                 serverJs: `const express = require('express');
 const app = express();
-const PORT = ${port};
+const PORT = ${portNum};
 
 app.get('/', (req, res) => {
   res.send(\`
@@ -301,10 +322,10 @@ app.get('/', (req, res) => {
     <body>
       <div class="container">
         <h1>🚀 ${sanitizedAppName}</h1>
-        <p>${description || 'Web Dashboard'}</p>
+        <p>${(description || 'Web Dashboard').replace(/'/g, "\\'")}</p>
         <div class="stats">
           <div class="stat">
-            <p>Port: <strong>${port}</strong></p>
+            <p>Port: <strong>${portNum}</strong></p>
           </div>
           <div class="stat">
             <p>Status: <strong>Online</strong></p>
@@ -334,7 +355,7 @@ app.listen(PORT, '0.0.0.0', () => {
                 serverJs: `const express = require('express');
 const path = require('path');
 const app = express();
-const PORT = ${port};
+const PORT = ${portNum};
 
 app.use(express.static('public'));
 
@@ -367,7 +388,7 @@ app.listen(PORT, '0.0.0.0', () => {
 </head>
 <body>
   <h1>${sanitizedAppName}</h1>
-  <p>${description || 'Static Website'}</p>
+  <p>${(description || 'Static Website').replace(/'/g, "\\'")}</p>
   <p>Edit files in public/ folder</p>
 </body>
 </html>`
@@ -375,7 +396,7 @@ app.listen(PORT, '0.0.0.0', () => {
             'custom': {
                 serverJs: `const express = require('express');
 const app = express();
-const PORT = ${port};
+const PORT = ${portNum};
 
 app.use(express.json());
 
@@ -409,28 +430,28 @@ app.listen(PORT, '0.0.0.0', () => {
 
         // Create server.js
         const serverJsContent = selectedTemplate.serverJs.replace(/\$/g, '\\$');
-        await ssh.executeCommand(`cat > ${appPath}/server.js << 'ENDOFFILE'
+        await ssh.executeCommand(`cat > ${escapeShellArg(`${appPath}/server.js`)} << 'ENDOFFILE'
 ${serverJsContent}
 ENDOFFILE`);
 
         // Create package.json
-        await ssh.executeCommand(`cat > ${appPath}/package.json << 'ENDOFFILE'
+        await ssh.executeCommand(`cat > ${escapeShellArg(`${appPath}/package.json`)} << 'ENDOFFILE'
 ${JSON.stringify(selectedTemplate.packageJson, null, 2)}
 ENDOFFILE`);
 
         // Create public/index.html for static site
         if (template === 'static-site') {
-            await ssh.executeCommand(`mkdir -p ${appPath}/public`);
-            await ssh.executeCommand(`cat > ${appPath}/public/index.html << 'ENDOFFILE'
+            await ssh.executeCommand(`mkdir -p ${escapeShellArg(`${appPath}/public`)}`);
+            await ssh.executeCommand(`cat > ${escapeShellArg(`${appPath}/public/index.html`)} << 'ENDOFFILE'
 ${selectedTemplate.indexHtml}
 ENDOFFILE`);
         }
 
         // Step 3: Install dependencies
-        await ssh.executeCommand(`cd ${appPath} && npm install --production`);
+        await ssh.executeCommand(`cd ${escapeShellArg(appPath)} && npm install --production`);
 
         // Step 4: Deploy with PM2 (set PORT env var for easy retrieval)
-        await ssh.executeCommand(`cd ${appPath} && PORT=${port} pm2 start server.js --name ${sanitizedAppName} --update-env`);
+        await ssh.executeCommand(`cd ${escapeShellArg(appPath)} && PORT=${portNum} pm2 start server.js --name ${escapeShellArg(sanitizedAppName)} --update-env`);
         await ssh.executeCommand(`pm2 save`);
 
         res.json({
@@ -438,9 +459,9 @@ ENDOFFILE`);
             message: `Ứng dụng ${sanitizedAppName} đã được tạo và deploy thành công!`,
             data: {
                 appName: sanitizedAppName,
-                port: port,
+                port: portNum,
                 path: appPath,
-                url: `http://${vpsConfig.host}:${port}`,
+                url: `http://${vpsConfig.host}:${portNum}`,
                 template: template
             }
         });
@@ -626,7 +647,7 @@ async function getEnvVariables(req, res) {
         const envFilePath = `${appPath}/.env`;
 
         // Check if file exists
-        const checkResult = await ssh.executeCommand(`test -f ${envFilePath} && echo "exists" || echo "notfound"`);
+        const checkResult = await ssh.executeCommand(`test -f ${escapeShellArg(envFilePath)} && echo "exists" || echo "notfound"`);
 
         if (checkResult.stdout.trim() === 'notfound') {
             return res.json({
@@ -639,7 +660,7 @@ async function getEnvVariables(req, res) {
         }
 
         // Read file
-        const readResult = await ssh.executeCommand(`cat ${envFilePath}`);
+        const readResult = await ssh.executeCommand(`cat ${escapeShellArg(envFilePath)}`);
         const content = readResult.stdout;
 
         // Parse .env content
@@ -683,6 +704,10 @@ async function getEnvVariables(req, res) {
 async function saveEnvVariables(req, res) {
     try {
         const { vpsConfig, appPath, appName, env } = req.body;
+        const safeAppName = sanitizeAppName(appName);
+        if (!safeAppName) {
+            return res.status(400).json({ success: false, error: 'Tên ứng dụng không hợp lệ' });
+        }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
         const envFilePath = `${appPath}/.env`;
@@ -699,10 +724,10 @@ async function saveEnvVariables(req, res) {
 
         // Write to file
         const escapedContent = content.replace(/\$/g, '\\$');
-        await ssh.executeCommand(`cat > ${envFilePath} << 'EOF'\n${escapedContent}EOF`);
+        await ssh.executeCommand(`cat > ${escapeShellArg(envFilePath)} << 'EOF'\n${escapedContent}EOF`);
 
         // Restart app to apply changes
-        await ssh.executeCommand(`pm2 restart ${appName}`);
+        await ssh.executeCommand(`pm2 restart ${escapeShellArg(safeAppName)}`);
         await ssh.executeCommand(`pm2 save`);
 
         res.json({

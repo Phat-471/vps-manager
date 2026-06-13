@@ -9,4 +9,8 @@ router.post('/mailbox/list', MailController.listMailboxes);
 router.post('/mailbox/create', MailController.createMailbox);
 router.post('/mailbox/delete', MailController.deleteMailbox);
 
+// SMTP Relay routes
+router.post('/relay/get', MailController.getSMTPRelayConfig);
+router.post('/relay/save', MailController.saveSMTPRelayConfig);
+
 module.exports = router;

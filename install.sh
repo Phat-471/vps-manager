@@ -61,11 +61,11 @@ cd /var/www/vps-manager || exit
 echo -e "${YELLOW}5. Đang cài đặt thư viện Backend...${NC}"
 npm install
 
-echo -e "${YELLOW}6. Đang cài đặt và biên dịch giao diện Frontend...${NC}"
-cd frontend || exit
-npm install
-npm run build
-cd ..
+echo -e "${YELLOW}6. Giao diện Frontend đã được biên dịch sẵn trong thư mục public/ (Bỏ qua để tiết kiệm RAM/CPU VPS)...${NC}"
+# cd frontend || exit
+# npm install
+# npm run build
+# cd ..
 
 echo -e "${YELLOW}7. Thiết lập mật khẩu bảo vệ Panel truy cập từ xa...${NC}"
 echo -e "Bạn có muốn đặt mật khẩu đăng nhập bảo vệ cho Panel từ xa không? (y/n)"
@@ -85,10 +85,10 @@ else
     echo "PORT=3000" > /var/www/vps-manager/.env
 fi
 
-echo -e "${YELLOW}8. Cài đặt PM2 và thiết lập chạy nền...${NC}"
+echo -e "${YELLOW}8. Cài đặt PM2 và thiết lập chạy nền (Tối ưu giới hạn RAM 128MB)...${NC}"
 npm install -g pm2
 pm2 delete vps-manager 2>/dev/null || true
-pm2 start server/server.js --name "vps-manager"
+pm2 start server/server.js --name "vps-manager" --node-args="--max-old-space-size=128"
 pm2 save
 
 # Cấu hình tự khởi động PM2 khi reboot VPS

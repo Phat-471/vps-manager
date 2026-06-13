@@ -56,7 +56,7 @@ async function addUser(req, res) {
         if (!safeUser) {
             return res.status(400).json({ success: false, error: 'Username không hợp lệ' });
         }
-        const escapedPass = String(pass || '').replace(/'/g, "\\'");
+        const escapedPass = String(pass || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const sql = `CREATE USER '${safeUser}'@'%' IDENTIFIED BY '${escapedPass}'; GRANT ALL PRIVILEGES ON *.* TO '${safeUser}'@'%'; FLUSH PRIVILEGES;`;
         
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
