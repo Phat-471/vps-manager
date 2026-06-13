@@ -1,4 +1,7 @@
 const { Client } = require('ssh2');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 class SSHConnection {
     constructor(config) {
@@ -8,6 +11,7 @@ class SSHConnection {
             username: config.username,
             password: config.password
         };
+        this.isLocal = this.config.host === 'localhost' || this.config.host === '127.0.0.1' || this.config.host === '0.0.0.0';
         this.client = null;
         this.isConnected = false;
     }
@@ -16,6 +20,12 @@ class SSHConnection {
      * Kết nối đến VPS
      */
     connect() {
+        if (this.isLocal) {
+            this.isConnected = true;
+            console.log('Local Mode Connection Ready');
+            return Promise.resolve(true);
+        }
+
         return new Promise((resolve, reject) => {
             this.client = new Client();
 
@@ -48,6 +58,11 @@ class SSHConnection {
      * Ngắt kết nối
      */
     disconnect() {
+        if (this.isLocal) {
+            this.isConnected = false;
+            return;
+        }
+
         if (this.client) {
             this.client.end();
             this.isConnected = false;
@@ -60,7 +75,19 @@ class SSHConnection {
     executeCommand(command) {
         return new Promise((resolve, reject) => {
             if (!this.isConnected) {
-                return reject(new Error('SSH not connected'));
+                return reject(new Error('Connection not established'));
+            }
+
+            if (this.isLocal) {
+                exec(command, (err, stdout, stderr) => {
+                    resolve({
+                        code: err ? (err.code || 1) : 0,
+                        signal: null,
+                        stdout: stdout,
+                        stderr: stderr || (err ? err.message : '')
+                    });
+                });
+                return;
             }
 
             this.client.exec(command, (err, stream) => {
@@ -97,7 +124,14 @@ class SSHConnection {
     readFile(remotePath) {
         return new Promise((resolve, reject) => {
             if (!this.isConnected) {
-                return reject(new Error('SSH not connected'));
+                return reject(new Error('Connection not established'));
+            }
+
+            if (this.isLocal) {
+                fs.promises.readFile(remotePath, 'utf8')
+                    .then(data => resolve(data))
+                    .catch(err => reject(err));
+                return;
             }
 
             this.client.sftp((err, sftp) => {
@@ -121,7 +155,18 @@ class SSHConnection {
     writeFile(remotePath, content) {
         return new Promise((resolve, reject) => {
             if (!this.isConnected) {
-                return reject(new Error('SSH not connected'));
+                return reject(new Error('Connection not established'));
+            }
+
+            if (this.isLocal) {
+                const dir = path.dirname(remotePath);
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                fs.promises.writeFile(remotePath, content, 'utf8')
+                    .then(() => resolve(true))
+                    .catch(err => reject(err));
+                return;
             }
 
             this.client.sftp((err, sftp) => {
@@ -145,7 +190,18 @@ class SSHConnection {
     uploadFile(localPath, remotePath) {
         return new Promise((resolve, reject) => {
             if (!this.isConnected) {
-                return reject(new Error('SSH not connected'));
+                return reject(new Error('Connection not established'));
+            }
+
+            if (this.isLocal) {
+                const dir = path.dirname(remotePath);
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                fs.promises.copyFile(localPath, remotePath)
+                    .then(() => resolve(true))
+                    .catch(err => reject(err));
+                return;
             }
 
             this.client.sftp((err, sftp) => {
@@ -169,7 +225,18 @@ class SSHConnection {
     downloadFile(remotePath, localPath) {
         return new Promise((resolve, reject) => {
             if (!this.isConnected) {
-                return reject(new Error('SSH not connected'));
+                return reject(new Error('Connection not established'));
+            }
+
+            if (this.isLocal) {
+                const dir = path.dirname(localPath);
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                fs.promises.copyFile(remotePath, localPath)
+                    .then(() => resolve(true))
+                    .catch(err => reject(err));
+                return;
             }
 
             this.client.sftp((err, sftp) => {
@@ -193,7 +260,12 @@ class SSHConnection {
     exists(remotePath) {
         return new Promise((resolve, reject) => {
             if (!this.isConnected) {
-                return reject(new Error('SSH not connected'));
+                return reject(new Error('Connection not established'));
+            }
+
+            if (this.isLocal) {
+                resolve(fs.existsSync(remotePath));
+                return;
             }
 
             this.client.sftp((err, sftp) => {

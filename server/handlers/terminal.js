@@ -12,6 +12,46 @@ function create(socket, vpsConfig) {
         destroy(socket);
     }
 
+    const isLocal = vpsConfig.host === 'localhost' || vpsConfig.host === '127.0.0.1' || vpsConfig.host === '0.0.0.0';
+
+    if (isLocal) {
+        const { spawn } = require('child_process');
+        const shell = spawn('/bin/bash', [], {
+            env: { ...process.env, TERM: 'xterm-256color' }
+        });
+
+        socket.emit('terminal:ready');
+
+        // Store session
+        activeSessions.set(sessionId, { shell });
+
+        shell.stdout.on('data', (data) => {
+            socket.emit('terminal:data', data.toString());
+        });
+
+        shell.stderr.on('data', (data) => {
+            socket.emit('terminal:data', data.toString());
+        });
+
+        shell.on('close', () => {
+            socket.emit('terminal:closed');
+            destroy(socket);
+        });
+
+        // Receive input from client
+        socket.on('terminal:input', (data) => {
+            if (shell.stdin.writable) {
+                shell.stdin.write(data);
+            }
+        });
+
+        socket.on('terminal:resize', () => {
+            // Raw spawn resize is ignored
+        });
+
+        return;
+    }
+
     const ssh = new Client();
 
     ssh.on('ready', () => {
@@ -89,6 +129,10 @@ function destroy(socket) {
 
         if (session.ssh) {
             session.ssh.end();
+        }
+
+        if (session.shell) {
+            session.shell.kill();
         }
 
         activeSessions.delete(sessionId);
