@@ -88,7 +88,7 @@ async function installMailServer(req, res) {
 
         const script = `
             DOMAIN="${cleanDomain}"
-            EMAIL="${cleanEmail}"
+            EMAIL=${escapeShellArg(cleanEmail)}
 
             # Detect OS
             if [ -f /etc/debian_version ]; then
@@ -312,7 +312,7 @@ async function createMailbox(req, res) {
 
         const script = `
             USER="${cleanUser}"
-            PASS="${password.replace(/"/g, '\\"')}"
+            PASS=${escapeShellArg(password)}
             DOMAIN="${cleanDomain}"
 
             if id "$USER" &>/dev/null; then
