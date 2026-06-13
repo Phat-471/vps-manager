@@ -319,7 +319,7 @@ async function createBackup(req, res) {
  */
 async function restoreBackup(req, res) {
     try {
-        const { vpsConfig, filename, restorePath, dbUser, dbPass } = req.body;
+        const { vpsConfig, filename, restorePath, dbUser, dbPass, cleanTarget, dropDatabase } = req.body;
 
         if (!filename) {
             return res.status(400).json({ success: false, error: 'Thiếu tên file backup để khôi phục' });
@@ -335,12 +335,26 @@ async function restoreBackup(req, res) {
         }
 
         let result;
+        let logBuffer = '';
+
         if (filename.startsWith('backup_dir_')) {
             if (!restorePath) {
                 return res.status(400).json({ success: false, error: 'Vui lòng cung cấp đường dẫn thư mục khôi phục' });
             }
-            // Giải nén đè vào đường dẫn chỉ định
-            result = await ssh.executeCommand(`tar -xzf ${backupFilePath} -C ${escapeShellArg(restorePath)}`);
+            const cleanPath = restorePath.trim();
+            if (cleanPath === '/' || cleanPath === '' || cleanPath.split('/').filter(Boolean).length <= 1) {
+                return res.status(400).json({ success: false, error: 'Đường dẫn thư mục khôi phục quá ngắn hoặc không an toàn để dọn dẹp' });
+            }
+
+            if (cleanTarget) {
+                logBuffer += `[INFO] Đang làm sạch thư mục đích: ${cleanPath}...\n`;
+                const cleanResult = await ssh.executeCommand(`rm -rf ${escapeShellArg(cleanPath)}/*`);
+                logBuffer += cleanResult.stdout + '\n' + cleanResult.stderr + '\n';
+            }
+
+            logBuffer += `[INFO] Đang giải nén tệp sao lưu vào ${cleanPath}...\n`;
+            result = await ssh.executeCommand(`tar -xzf ${backupFilePath} -C ${escapeShellArg(cleanPath)}`);
+            logBuffer += result.stdout + '\n' + result.stderr + '\n';
         } else if (filename.startsWith('backup_db_')) {
             // Lấy database name từ filename
             const match = filename.match(/^backup_db_(.*)_(\d{8}_\d{6})\.sql\.gz$/);
@@ -349,8 +363,15 @@ async function restoreBackup(req, res) {
             }
             const dbName = match[1];
 
-            // Đảm bảo database tồn tại trước khi import
-            await ssh.executeCommand(`mysql -e 'CREATE DATABASE IF NOT EXISTS \`${dbName}\`;'`);
+            if (dropDatabase) {
+                logBuffer += `[INFO] Đang xóa (Drop) cơ sở dữ liệu cũ \`${dbName}\`...\n`;
+                const dropResult = await ssh.executeCommand(`mysql -e 'DROP DATABASE IF EXISTS \`${dbName}\`; CREATE DATABASE \`${dbName}\`;'`);
+                logBuffer += dropResult.stdout + '\n' + dropResult.stderr + '\n';
+            } else {
+                logBuffer += `[INFO] Khởi tạo cơ sở dữ liệu \`${dbName}\` nếu chưa tồn tại...\n`;
+                const createResult = await ssh.executeCommand(`mysql -e 'CREATE DATABASE IF NOT EXISTS \`${dbName}\`;'`);
+                logBuffer += createResult.stdout + '\n' + createResult.stderr + '\n';
+            }
 
             let importCmd = `gunzip -c ${backupFilePath} | mysql `;
             if (dbPass) {
@@ -359,7 +380,9 @@ async function restoreBackup(req, res) {
                 importCmd += `-u${dbUser || 'root'} ${dbName}`;
             }
 
+            logBuffer += `[INFO] Đang nạp cơ sở dữ liệu từ tệp nén...\n`;
             result = await ssh.executeCommand(importCmd);
+            logBuffer += result.stdout + '\n' + result.stderr + '\n';
         } else {
             return res.status(400).json({ success: false, error: 'Loại file backup không được hỗ trợ để tự động phục hồi' });
         }
@@ -368,13 +391,14 @@ async function restoreBackup(req, res) {
             return res.status(500).json({
                 success: false,
                 error: 'Khôi phục dữ liệu thất bại',
-                log: result.stderr
+                log: logBuffer
             });
         }
 
         res.json({
             success: true,
-            message: 'Khôi phục dữ liệu thành công!'
+            message: 'Khôi phục dữ liệu thành công!',
+            log: logBuffer
         });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });

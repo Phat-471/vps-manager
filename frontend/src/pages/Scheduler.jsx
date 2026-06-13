@@ -66,6 +66,8 @@ export default function Scheduler() {
   const [restorePath, setRestorePath] = useState('/var/www');
   const [restoreDbUser, setRestoreDbUser] = useState('root');
   const [restoreDbPass, setRestoreDbPass] = useState('');
+  const [cleanTarget, setCleanTarget] = useState(false);
+  const [dropDatabase, setDropDatabase] = useState(false);
 
   // Command Run Log State
   const [runLog, setRunLog] = useState(null);
@@ -322,6 +324,8 @@ export default function Scheduler() {
       if (isManualBackup) {
         // Run manual backup immediately
         showToast('Đang chạy sao lưu dữ liệu...', 'info');
+        setRunningJob(true);
+        setRunLog('Bắt đầu tiến trình sao lưu trên VPS...');
         const manualType = backupType;
         const bodyData = {
           type: manualType,
@@ -342,6 +346,7 @@ export default function Scheduler() {
 
         const res = await apiCall('/api/backups/create', 'POST', bodyData);
         showToast(res.message, 'success');
+        setRunLog(res.log || 'Sao lưu hoàn tất không có log chi tiết.');
       } else {
         // Save backup schedule in Cron
         await apiCall('/api/cron/add', 'POST', {
@@ -357,6 +362,9 @@ export default function Scheduler() {
       fetchData();
     } catch (err) {
       console.error(err);
+      setRunLog(`Lỗi tiến trình sao lưu:\n${err.message}`);
+    } finally {
+      setRunningJob(false);
     }
   };
 
@@ -407,6 +415,8 @@ export default function Scheduler() {
 
   const handleOpenRestore = (backup) => {
     setSelectedBackup(backup);
+    setCleanTarget(false);
+    setDropDatabase(false);
     if (backup.type === 'dir') {
       // Guess restore path by directory name
       setRestorePath(`/var/www/${backup.targetName}`);
@@ -423,16 +433,24 @@ export default function Scheduler() {
 
     try {
       showToast('Đang tiến hành khôi phục dữ liệu trên VPS...', 'info');
+      setRunningJob(true);
+      setRunLog('Bắt đầu tiến trình khôi phục dữ liệu trên VPS...');
       const res = await apiCall('/api/backups/restore', 'POST', {
         filename: selectedBackup.filename,
         restorePath: selectedBackup.type === 'dir' ? restorePath.trim() : undefined,
         dbUser: selectedBackup.type === 'mysql' ? restoreDbUser : undefined,
-        dbPass: selectedBackup.type === 'mysql' ? restoreDbPass : undefined
+        dbPass: selectedBackup.type === 'mysql' ? restoreDbPass : undefined,
+        cleanTarget: selectedBackup.type === 'dir' ? cleanTarget : undefined,
+        dropDatabase: selectedBackup.type === 'mysql' ? dropDatabase : undefined
       });
       showToast(res.message, 'success');
+      setRunLog(res.log || 'Khôi phục hoàn tất không có log chi tiết.');
       setShowRestoreModal(false);
     } catch (err) {
       console.error(err);
+      setRunLog(`Lỗi tiến trình khôi phục:\n${err.message}`);
+    } finally {
+      setRunningJob(false);
     }
   };
 
@@ -1151,22 +1169,36 @@ export default function Scheduler() {
 
             <form onSubmit={handleRestoreBackup} className="space-y-4 text-sm">
               {selectedBackup.type === 'dir' ? (
-                <div className="space-y-1">
-                  <label className="text-gray-400 font-medium">Giải nén khôi phục vào thư mục gốc:</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="VD: /var/www/my-site"
-                    value={restorePath}
-                    onChange={(e) => setRestorePath(e.target.value)}
-                    className="input-glass w-full"
-                    style={{ padding: '8px' }}
-                  />
-                  <p className="text-[10px] text-gray-400">Nội dung nén sẽ được giải nén trực tiếp đè vào thư mục này.</p>
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-gray-400 font-medium">Giải nén khôi phục vào thư mục gốc:</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="VD: /var/www/my-site"
+                      value={restorePath}
+                      onChange={(e) => setRestorePath(e.target.value)}
+                      className="input-glass w-full"
+                      style={{ padding: '8px' }}
+                    />
+                    <p className="text-[10px] text-gray-400">Nội dung nén sẽ được giải nén trực tiếp đè vào thư mục này.</p>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="clean_target"
+                      checked={cleanTarget}
+                      onChange={(e) => setCleanTarget(e.target.checked)}
+                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                    />
+                    <label htmlFor="clean_target" className="text-red-300 cursor-pointer font-medium text-xs">
+                      Xóa sạch thư mục gốc trước khi giải nén (Khuyên dùng)
+                    </label>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-400">Database đích: <strong className="text-indigo-300">{selectedBackup.targetName}</strong> (Tự động khởi tạo nếu chưa có)</p>
+                  <p className="text-xs text-gray-400">Database đích: <strong className="text-indigo-300">{selectedBackup.targetName}</strong></p>
                   <div className="space-y-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div className="space-y-1">
                       <label className="text-gray-400 font-medium">User DB:</label>
@@ -1189,6 +1221,18 @@ export default function Scheduler() {
                         style={{ padding: '8px' }}
                       />
                     </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="drop_database"
+                      checked={dropDatabase}
+                      onChange={(e) => setDropDatabase(e.target.checked)}
+                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                    />
+                    <label htmlFor="drop_database" className="text-red-300 cursor-pointer font-medium text-xs">
+                      Xóa (Drop) Database cũ trước khi nạp lại (Khuyên dùng)
+                    </label>
                   </div>
                 </div>
               )}
