@@ -14,7 +14,8 @@ import {
   Play, 
   LogOut,
   Clock,
-  BarChart2
+  BarChart2,
+  Bell
 } from 'lucide-react';
 
 const MENU_ITEMS = [
@@ -28,6 +29,7 @@ const MENU_ITEMS = [
   { id: 'files', label: 'Quản lý File', icon: FolderOpen },
   { id: 'security', label: 'Bảo mật', icon: Shield },
   { id: 'scheduler', label: 'Lập lịch & Sao lưu', icon: Clock },
+  { id: 'alerts', label: 'Cảnh báo hệ thống', icon: Bell },
   { id: 'docker', label: 'Docker', icon: Play },
   { id: 'terminal', label: 'Terminal (SSH)', icon: Terminal },
   { id: 'maintenance', label: 'Bảo trì hệ thống', icon: Wrench },

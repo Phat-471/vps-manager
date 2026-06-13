@@ -1,0 +1,27 @@
+{
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "botToken": "",
+      "chatId": ""
+    },
+    "discord": {
+      "enabled": false,
+      "webhookUrl": ""
+    }
+  },
+  "thresholds": {
+    "test_vps_1": {
+      "id": "test_vps_1",
+      "host": "127.0.0.1",
+      "port": 2222,
+      "username": "root",
+      "password": "ef48ea3dd3b43eb2b103d2e9393a834c:aeb28dc3acecb4c0293225601313d3cbdf6409ed53b6965af882de9387f82536",
+      "enabled": true,
+      "cpuLimit": 85,
+      "ramLimit": 75,
+      "diskLimit": 90,
+      "downtimeAlert": true
+    }
+  }
+}

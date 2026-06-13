@@ -66,6 +66,7 @@ const authRoutes = require('./routes/auth');
 const cronRoutes = require('./routes/cron');
 const backupRoutes = require('./routes/backup');
 const statsRoutes = require('./routes/stats');
+const alertsRoutes = require('./routes/alerts');
 
 // API Routes (Tuyến đường mở cho Auth)
 app.use('/api/auth', authRoutes);
@@ -102,6 +103,7 @@ app.use('/api/docker', dockerRoutes);
 app.use('/api/cron', cronRoutes);
 app.use('/api/backups', backupRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/alerts', alertsRoutes);
 
 // Socket.IO for real-time features
 io.on('connection', (socket) => {
@@ -157,6 +159,10 @@ app.use((req, res) => {
 server.listen(PORT, () => {
   console.log(`🚀 VPS Management Tool đang chạy tại http://localhost:${PORT}`);
   console.log(`📡 WebSocket server đã sẵn sàng`);
+  
+  // Khởi động Alert & Monitoring Daemon chạy ngầm
+  const alertDaemon = require('./utils/alertDaemon');
+  alertDaemon.init();
 });
 
 module.exports = { app, io };

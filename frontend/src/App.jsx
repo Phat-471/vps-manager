@@ -17,22 +17,24 @@ import Scripts from './pages/Scripts';
 import Maintenance from './pages/Maintenance';
 import Scheduler from './pages/Scheduler';
 import TrafficStats from './pages/TrafficStats';
+import Alerts from './pages/Alerts';
 import './index.css';
 
 const pageMap = {
   dashboard: <Dashboard />,
   services: <Services />,
   webserver: <WebServer />,
+  stats: <TrafficStats />,
   mysql: <MySQL />,
   applications: <Applications />,
   files: <FileManager />,
   security: <Security />,
+  scheduler: <Scheduler />,
+  alerts: <Alerts />,
   docker: <Docker />,
   terminal: <Terminal />,
   scripts: <Scripts />,
   maintenance: <Maintenance />,
-  scheduler: <Scheduler />,
-  stats: <TrafficStats />,
 };
 
 function AppShell() {
