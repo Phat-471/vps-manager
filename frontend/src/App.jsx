@@ -20,6 +20,7 @@ import TrafficStats from './pages/TrafficStats';
 import Alerts from './pages/Alerts';
 import PHPConfig from './pages/PHPConfig';
 import NodeConfig from './pages/NodeConfig';
+import MailConfig from './pages/MailConfig';
 import './index.css';
 
 const pageMap = {
@@ -35,6 +36,7 @@ const pageMap = {
   alerts: <Alerts />,
   phpconfig: <PHPConfig />,
   nodeconfig: <NodeConfig />,
+  mailconfig: <MailConfig />,
   docker: <Docker />,
   terminal: <Terminal />,
   scripts: <Scripts />,

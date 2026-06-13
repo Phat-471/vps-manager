@@ -17,7 +17,8 @@ import {
   BarChart2,
   Bell,
   Sliders,
-  Zap
+  Zap,
+  Mail
 } from 'lucide-react';
 
 const MENU_ITEMS = [
@@ -28,6 +29,7 @@ const MENU_ITEMS = [
   { id: 'stats', label: 'Thống kê truy cập', icon: BarChart2 },
   { id: 'phpconfig', label: 'Cấu hình PHP', icon: Sliders },
   { id: 'nodeconfig', label: 'Quản lý Node.js', icon: Zap },
+  { id: 'mailconfig', label: 'Mail Server', icon: Mail },
   { id: 'mysql', label: 'Quản lý MySQL', icon: Database },
   { id: 'applications', label: 'Quản lý Ứng dụng', icon: Layers },
   { id: 'files', label: 'Quản lý File', icon: FolderOpen },

@@ -18,7 +18,9 @@ const COMMON_SERVICES = [
     'ssh',
     'sshd',
     'fail2ban',
-    'ufw'
+    'ufw',
+    'postfix',
+    'dovecot'
 ];
 
 /**
