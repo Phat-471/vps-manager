@@ -42,11 +42,23 @@ export default function WebServer() {
   const [path, setPath] = useState('/var/www/html');
   const [type, setType] = useState('php');
   const [proxyPort, setProxyPort] = useState('3000');
+  const [antiDdos, setAntiDdos] = useState(false);
+  const [blockBots, setBlockBots] = useState(false);
   
   // Config Editor state
   const [editingDomain, setEditingDomain] = useState('');
   const [configContent, setConfigContent] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
+
+  const handleOpenAddModal = () => {
+    setDomain('');
+    setPath('/var/www/html');
+    setType('php');
+    setProxyPort('3000');
+    setAntiDdos(false);
+    setBlockBots(false);
+    setShowAddModal(true);
+  };
 
 
   const loadSites = async () => {
@@ -146,7 +158,9 @@ export default function WebServer() {
         domain,
         root: path,
         type,
-        proxyPort: type === 'proxy' ? proxyPort : ''
+        proxyPort: type === 'proxy' ? proxyPort : '',
+        antiDdos,
+        blockBots
       });
 
       if (result.success) {
@@ -252,7 +266,7 @@ export default function WebServer() {
             <RotateCw size={16} className={loading ? 'animate-spin' : ''} />
             Làm mới
           </button>
-          <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
+          <button className="btn btn-primary" onClick={handleOpenAddModal}>
             <Plus size={16} />
             Thêm Website
           </button>
@@ -517,6 +531,31 @@ export default function WebServer() {
                     <input type="number" value={proxyPort} onChange={e => setProxyPort(e.target.value)} placeholder="3000" className="input-glass" required />
                   </div>
                 )}
+                
+                {/* Security settings */}
+                <div className="space-y-3 pt-3 border-t border-white/5">
+                  <label className="text-xs text-indigo-300 font-semibold block uppercase tracking-wider">Bảo mật nâng cao</label>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer hover:text-white transition-all">
+                      <input 
+                        type="checkbox" 
+                        checked={antiDdos} 
+                        onChange={e => setAntiDdos(e.target.checked)} 
+                        className="rounded bg-white/5 border-white/10 text-indigo-500 focus:ring-0 focus:ring-offset-0"
+                      />
+                      Kích hoạt Chống DDoS & Rate Limit Nginx
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer hover:text-white transition-all">
+                      <input 
+                        type="checkbox" 
+                        checked={blockBots} 
+                        onChange={e => setBlockBots(e.target.checked)} 
+                        className="rounded bg-white/5 border-white/10 text-indigo-500 focus:ring-0 focus:ring-offset-0"
+                      />
+                      Chặn Crawler & Bots xấu (Ahrefs, Semrush, Scrapers...)
+                    </label>
+                  </div>
+                </div>
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-glass" onClick={() => setShowAddModal(false)}>Hủy</button>

@@ -65,6 +65,7 @@ const dockerRoutes = require('./routes/docker');
 const authRoutes = require('./routes/auth');
 const cronRoutes = require('./routes/cron');
 const backupRoutes = require('./routes/backup');
+const statsRoutes = require('./routes/stats');
 
 // API Routes (Tuyến đường mở cho Auth)
 app.use('/api/auth', authRoutes);
@@ -100,6 +101,7 @@ app.use('/api/security', securityRoutes);
 app.use('/api/docker', dockerRoutes);
 app.use('/api/cron', cronRoutes);
 app.use('/api/backups', backupRoutes);
+app.use('/api/stats', statsRoutes);
 
 // Socket.IO for real-time features
 io.on('connection', (socket) => {

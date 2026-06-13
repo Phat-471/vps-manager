@@ -278,6 +278,100 @@ async function configurePanelSSL(req, res) {
     }
 }
 
+/**
+ * Lấy danh sách IP bị chặn bởi UFW
+ */
+async function getBlacklistIPs(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const result = await ssh.executeCommand('ufw status numbered');
+        const isActive = result.stdout.includes('Status: active');
+        
+        const blacklist = [];
+        if (isActive) {
+            const lines = result.stdout.trim().split('\n');
+            lines.forEach(line => {
+                const match = line.match(/\[\s*(\d+)\]\s+(.*?)\s+DENY IN\s+(\S+)/);
+                if (match) {
+                    blacklist.push({
+                        index: match[1],
+                        to: match[2].trim(),
+                        ip: match[3].trim()
+                    });
+                }
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                active: isActive,
+                ips: blacklist
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * Chặn một địa chỉ IP (Thêm vào UFW Deny Rule số 1)
+ */
+async function blockIP(req, res) {
+    try {
+        const { vpsConfig, ip } = req.body;
+        
+        if (!ip) {
+            return res.status(400).json({ success: false, error: 'Thiếu địa chỉ IP' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        
+        // Đảm bảo UFW được bật
+        await ssh.executeCommand('echo "y" | ufw enable');
+        
+        // Chèn luật chặn lên hàng đầu
+        const cleanIP = ip.trim();
+        const result = await ssh.executeCommand(`ufw insert 1 deny from ${escapeShellArg(cleanIP)} to any`);
+        
+        if (result.code !== 0) {
+            throw new Error(result.stderr || 'Không thể thiết lập quy tắc chặn trên UFW');
+        }
+
+        res.json({ success: true, message: `Đã chặn địa chỉ IP ${cleanIP} thành công` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * Gỡ chặn địa chỉ IP
+ */
+async function unblockIP(req, res) {
+    try {
+        const { vpsConfig, ip } = req.body;
+
+        if (!ip) {
+            return res.status(400).json({ success: false, error: 'Thiếu địa chỉ IP cần gỡ chặn' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cleanIP = ip.trim();
+        
+        const result = await ssh.executeCommand(`ufw delete deny from ${escapeShellArg(cleanIP)} to any`);
+        
+        if (result.code !== 0) {
+            throw new Error(result.stderr || 'Không thể xóa quy tắc chặn trên UFW');
+        }
+
+        res.json({ success: true, message: `Đã gỡ chặn địa chỉ IP ${cleanIP} thành công` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getUFWStatus,
     enableUFW,
@@ -287,5 +381,8 @@ module.exports = {
     getFail2BanStatus,
     changeSSHPort,
     getListeningPorts,
-    configurePanelSSL
+    configurePanelSSL,
+    getBlacklistIPs,
+    blockIP,
+    unblockIP
 };

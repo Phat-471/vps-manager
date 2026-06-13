@@ -41,11 +41,18 @@ export default function Security() {
   const [sslLoading, setSslLoading] = useState(false);
   const [sslResult, setSslResult] = useState(null);
 
+  // Tab 5: IP Blacklist State
+  const [blacklistIPs, setBlacklistIPs] = useState([]);
+  const [blacklistLoading, setBlacklistLoading] = useState(false);
+  const [ipToBlock, setIpToBlock] = useState('');
+
   useEffect(() => {
     if (activeTab === 'firewall') {
       fetchSecurityStatus();
     } else if (activeTab === 'ports') {
       fetchListeningPorts();
+    } else if (activeTab === 'blacklist') {
+      fetchBlacklistIPs();
     }
   }, [activeTab]);
 
@@ -183,6 +190,57 @@ export default function Security() {
     }
   };
 
+  const fetchBlacklistIPs = async () => {
+    setBlacklistLoading(true);
+    try {
+      const res = await apiCall('/api/security/blacklist/list', 'POST');
+      if (res.success) {
+        setBlacklistIPs(res.data?.ips || []);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi tải danh sách IP bị chặn: ' + err.message, 'error');
+    } finally {
+      setBlacklistLoading(false);
+    }
+  };
+
+  const handleBlockIP = async (e) => {
+    e.preventDefault();
+    if (!ipToBlock.trim()) return;
+    setBlacklistLoading(true);
+    try {
+      const res = await apiCall('/api/security/blacklist/block', 'POST', { ip: ipToBlock });
+      if (res.success) {
+        showToast(res.message || `Đã chặn IP ${ipToBlock} thành công`, 'success');
+        setIpToBlock('');
+        fetchBlacklistIPs();
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi khi chặn IP: ' + err.message, 'error');
+    } finally {
+      setBlacklistLoading(false);
+    }
+  };
+
+  const handleUnblockIP = async (ip) => {
+    if (!window.confirm(`Bạn có chắc muốn gỡ chặn IP ${ip}?`)) return;
+    setBlacklistLoading(true);
+    try {
+      const res = await apiCall('/api/security/blacklist/unblock', 'POST', { ip });
+      if (res.success) {
+        showToast(res.message || `Đã gỡ chặn IP ${ip} thành công`, 'success');
+        fetchBlacklistIPs();
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi khi gỡ chặn IP: ' + err.message, 'error');
+    } finally {
+      setBlacklistLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Panel */}
@@ -222,6 +280,13 @@ export default function Security() {
         >
           <Globe size={16} />
           SSL Panel (HTTPS)
+        </button>
+        <button 
+          onClick={() => setActiveTab('blacklist')}
+          className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === 'blacklist' ? 'active bg-indigo-500/20 text-indigo-300' : 'text-gray-400 hover:text-white'}`}
+        >
+          <ShieldAlert size={16} />
+          Danh sách đen IP (Blacklist)
         </button>
       </div>
 
@@ -565,6 +630,95 @@ export default function Security() {
               <Lock size={14} className="text-indigo-400 shrink-0" />
               <span>Chứng chỉ Let's Encrypt SSL tự động gia hạn sau mỗi 90 ngày.</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: IP Blacklist */}
+      {activeTab === 'blacklist' && (
+        <div className="db-layout-container">
+          {/* Blacklisted IPs List */}
+          <div className="db-layout-main card-glass p-6 rounded-xl space-y-4">
+            <h3 className="font-semibold text-lg flex items-center gap-2">
+              <ShieldAlert size={18} className="text-red-400" />
+              Địa chỉ IP đang bị chặn (Firewall Blacklist)
+            </h3>
+            <p className="text-sm text-gray-400 font-normal">
+              Các địa chỉ IP dưới đây sẽ bị chặn toàn bộ lưu lượng truy cập đi vào VPS thông qua tường lửa UFW.
+            </p>
+
+            {blacklistLoading && blacklistIPs.length === 0 ? (
+              <div className="py-12 flex justify-center">
+                <span className="w-8 h-8 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+              </div>
+            ) : blacklistIPs.length === 0 ? (
+              <p className="text-sm text-gray-400 py-6 text-center font-normal">Chưa chặn địa chỉ IP nào.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="explorer-list-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '60px' }}>Quy tắc</th>
+                      <th>IP / Khối mạng</th>
+                      <th>Cổng đích (To)</th>
+                      <th style={{ textAlign: 'center', width: '100px' }}>Hành động</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {blacklistIPs.map((item) => (
+                      <tr key={item.index}>
+                        <td className="font-mono text-xs text-gray-400">#{item.index}</td>
+                        <td className="font-mono font-semibold text-red-300">{item.ip}</td>
+                        <td className="text-gray-300 text-xs">{item.to}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          <button
+                            onClick={() => handleUnblockIP(item.ip)}
+                            className="btn btn-glass btn-xs text-green-400 hover:text-green-300"
+                            style={{ padding: '4px 8px', fontSize: '11px' }}
+                          >
+                            Gỡ chặn
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Block IP Form */}
+          <div className="db-layout-sidebar card-glass p-6 rounded-xl space-y-4">
+            <h3 className="font-semibold text-lg flex items-center gap-2">
+              <Plus size={18} className="text-red-400" />
+              Chặn địa chỉ IP mới
+            </h3>
+            <p className="text-xs text-gray-400 leading-relaxed font-normal">
+              Nhập IP hoặc dải IP (CIDR) để chặn ngay lập tức.
+            </p>
+            <form onSubmit={handleBlockIP} className="space-y-4">
+              <div className="form-group">
+                <label>Địa chỉ IP cần chặn</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ví dụ: 192.168.1.100 hoặc 1.2.3.4"
+                  value={ipToBlock}
+                  onChange={(e) => setIpToBlock(e.target.value)}
+                  className="input-glass"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={blacklistLoading}
+                className="btn btn-danger btn-block"
+                style={{ padding: '10px' }}
+              >
+                <Power size={14} />
+                Áp dụng Chặn IP
+              </button>
+            </form>
           </div>
         </div>
       )}

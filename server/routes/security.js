@@ -11,5 +11,8 @@ router.post('/fail2ban/status', SecurityController.getFail2BanStatus);
 router.post('/ssh/port', SecurityController.changeSSHPort);
 router.post('/ports/listening', SecurityController.getListeningPorts);
 router.post('/panel/ssl', SecurityController.configurePanelSSL);
+router.post('/blacklist/list', SecurityController.getBlacklistIPs);
+router.post('/blacklist/block', SecurityController.blockIP);
+router.post('/blacklist/unblock', SecurityController.unblockIP);
 
 module.exports = router;

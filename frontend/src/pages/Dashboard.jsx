@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useVPS } from '../context/VPSContext';
 import Topbar from '../components/Topbar';
-import { RotateCw, Power, Cpu, Trash2, Key, ShieldCheck, X } from 'lucide-react';
+import { RotateCw, Power, Cpu, Trash2, Key, ShieldCheck, X, Check, Activity } from 'lucide-react';
 
 export default function Dashboard() {
-  const { socket, apiCall, showToast, isConnected, currentVPS, isPanelProtected, setupPanel } = useVPS();
+  const { socket, apiCall, showToast, isConnected, currentVPS, isPanelProtected, setupPanel, setActivePage } = useVPS();
   const [cpu, setCpu] = useState(0);
   const [ram, setRam] = useState({ usage: 0, total: 'Đang tải...', used: 'Đang tải...' });
   const [disk, setDisk] = useState({ usage: 0, total: 'Đang tải...', used: 'Đang tải...' });
@@ -16,6 +16,10 @@ export default function Dashboard() {
     arch: 'Đang tải...',
     kernel: 'Đang tải...'
   });
+
+  // Checklist state
+  const [checklist, setChecklist] = useState(null);
+  const [loadingChecklist, setLoadingChecklist] = useState(false);
 
   // Action states
   const [actionLoading, setActionLoading] = useState(false);
@@ -29,6 +33,20 @@ export default function Dashboard() {
   const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
   const [setupLoading, setSetupLoading] = useState(false);
 
+
+  const fetchChecklist = async () => {
+    setLoadingChecklist(true);
+    try {
+      const res = await apiCall('/api/system/setup-check', 'POST');
+      if (res.success) {
+        setChecklist(res.data);
+      }
+    } catch (err) {
+      console.error('Lỗi nạp checklist cấu hình:', err);
+    } finally {
+      setLoadingChecklist(false);
+    }
+  };
 
   const loadStaticData = async () => {
     try {
@@ -162,6 +180,7 @@ export default function Dashboard() {
 
     // Load static data first
     loadStaticData();
+    fetchChecklist();
 
     // Listen to real-time socket updates
     if (socket && currentVPS) {
@@ -225,12 +244,162 @@ export default function Dashboard() {
   return (
     <div className="content-area">
       <Topbar title="TỔNG QUAN HỆ THỐNG">
-        <button className="btn btn-primary" onClick={loadStaticData}>
+        <button className="btn btn-primary" onClick={() => { loadStaticData(); fetchChecklist(); }}>
           <RotateCw size={14} /> Làm mới
         </button>
       </Topbar>
 
-      {!isPanelProtected && (
+      {/* Setup Assistant Card */}
+      {checklist && (
+        (!checklist.isPanelProtected || checklist.isDefaultSSHPort || !checklist.hasNginx || !checklist.hasMySQL || !checklist.hasBackupSchedules || !checklist.hasWebsites)
+      ) && (
+        <div className="card-glass p-6 rounded-xl mb-6 space-y-4 border border-indigo-500/10">
+          <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h2 className="text-base font-bold text-gray-200 flex items-center gap-2">
+                <Activity className="text-indigo-400" size={18} />
+                Trợ lý Cài đặt & Tối ưu VPS lần đầu
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">Thực hiện các cấu hình cơ bản dưới đây để đưa VPS của bạn vào hoạt động an toàn và ổn định.</p>
+            </div>
+            <div className="text-right">
+              <span className="text-xs text-indigo-300 font-semibold block mb-1">
+                Hoàn thành: {
+                  ((checklist.isPanelProtected ? 1 : 0) + 
+                   (!checklist.isDefaultSSHPort ? 1 : 0) + 
+                   ((checklist.hasNginx && checklist.hasMySQL) ? 1 : 0) + 
+                   (checklist.hasBackupSchedules ? 1 : 0) + 
+                   (checklist.hasWebsites ? 1 : 0))
+                } / 5 bước
+              </span>
+              <div className="w-32 bg-white/5 rounded-full h-1.5 overflow-hidden">
+                <div 
+                  className="h-full bg-indigo-500 rounded-full" 
+                  style={{ 
+                    width: `${
+                      (((checklist.isPanelProtected ? 1 : 0) + 
+                        (!checklist.isDefaultSSHPort ? 1 : 0) + 
+                        ((checklist.hasNginx && checklist.hasMySQL) ? 1 : 0) + 
+                        (checklist.hasBackupSchedules ? 1 : 0) + 
+                        (checklist.hasWebsites ? 1 : 0)) / 5) * 100
+                    }%` 
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 pt-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px' }}>
+            {/* Step 1 */}
+            <div className="card-glass p-3 rounded-lg space-y-2 relative border border-white/5" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="text-[10px] text-indigo-400 font-bold uppercase">Bước 1</span>
+                  {checklist.isPanelProtected ? (
+                    <span className="text-emerald-400 flex items-center gap-0.5 text-xs"><Check size={12} /> Đã đặt</span>
+                  ) : (
+                    <span className="text-yellow-400 flex items-center gap-0.5 text-xs"><X size={12} /> Chưa bảo vệ</span>
+                  )}
+                </div>
+                <h4 className="text-xs font-semibold text-gray-200">Mật khẩu Panel</h4>
+                <p className="text-[10px] text-gray-400 leading-relaxed">Khóa mật khẩu đăng nhập từ xa vào bảng điều khiển.</p>
+              </div>
+              {!checklist.isPanelProtected && (
+                <button onClick={() => setShowSetupModal(true)} className="btn btn-glass btn-xs text-yellow-300 w-full mt-2" style={{ fontSize: '10px', padding: '4px' }}>
+                  Đặt mật khẩu
+                </button>
+              )}
+            </div>
+
+            {/* Step 2 */}
+            <div className="card-glass p-3 rounded-lg space-y-2 relative border border-white/5" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="text-[10px] text-indigo-400 font-bold uppercase">Bước 2</span>
+                  {(checklist.hasNginx && checklist.hasMySQL) ? (
+                    <span className="text-emerald-400 flex items-center gap-0.5 text-xs"><Check size={12} /> Đã cài</span>
+                  ) : (
+                    <span className="text-yellow-400 flex items-center gap-0.5 text-xs"><X size={12} /> Thiếu dịch vụ</span>
+                  )}
+                </div>
+                <h4 className="text-xs font-semibold text-gray-200">Nginx & MySQL</h4>
+                <p className="text-[10px] text-gray-400 leading-relaxed">Cơ sở hạ tầng chạy Web Server & Cơ sở dữ liệu.</p>
+              </div>
+              {!(checklist.hasNginx && checklist.hasMySQL) && (
+                <button onClick={() => setActivePage('maintenance')} className="btn btn-glass btn-xs text-yellow-300 w-full mt-2" style={{ fontSize: '10px', padding: '4px' }}>
+                  Đi đến cài đặt
+                </button>
+              )}
+            </div>
+
+            {/* Step 3 */}
+            <div className="card-glass p-3 rounded-lg space-y-2 relative border border-white/5" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="text-[10px] text-indigo-400 font-bold uppercase">Bước 3</span>
+                  {!checklist.isDefaultSSHPort ? (
+                    <span className="text-emerald-400 flex items-center gap-0.5 text-xs"><Check size={12} /> Cổng {checklist.sshPort}</span>
+                  ) : (
+                    <span className="text-yellow-400 flex items-center gap-0.5 text-xs"><X size={12} /> Cổng 22 (Yếu)</span>
+                  )}
+                </div>
+                <h4 className="text-xs font-semibold text-gray-200">Bảo mật SSH</h4>
+                <p className="text-[10px] text-gray-400 leading-relaxed">Đổi cổng kết nối SSH để chống tấn công brute-force.</p>
+              </div>
+              {checklist.isDefaultSSHPort && (
+                <button onClick={() => setActivePage('security')} className="btn btn-glass btn-xs text-yellow-300 w-full mt-2" style={{ fontSize: '10px', padding: '4px' }}>
+                  Đổi cổng SSH
+                </button>
+              )}
+            </div>
+
+            {/* Step 4 */}
+            <div className="card-glass p-3 rounded-lg space-y-2 relative border border-white/5" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="text-[10px] text-indigo-400 font-bold uppercase">Bước 4</span>
+                  {checklist.hasBackupSchedules ? (
+                    <span className="text-emerald-400 flex items-center gap-0.5 text-xs"><Check size={12} /> Đã đặt</span>
+                  ) : (
+                    <span className="text-yellow-400 flex items-center gap-0.5 text-xs"><X size={12} /> Chưa backup</span>
+                  )}
+                </div>
+                <h4 className="text-xs font-semibold text-gray-200">Lập lịch Sao lưu</h4>
+                <p className="text-[10px] text-gray-400 leading-relaxed">Cấu hình backup mã nguồn & CSDL tự động hàng ngày.</p>
+              </div>
+              {!checklist.hasBackupSchedules && (
+                <button onClick={() => setActivePage('scheduler')} className="btn btn-glass btn-xs text-yellow-300 w-full mt-2" style={{ fontSize: '10px', padding: '4px' }}>
+                  Lập lịch ngay
+                </button>
+              )}
+            </div>
+
+            {/* Step 5 */}
+            <div className="card-glass p-3 rounded-lg space-y-2 relative border border-white/5" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="text-[10px] text-indigo-400 font-bold uppercase">Bước 5</span>
+                  {checklist.hasWebsites ? (
+                    <span className="text-emerald-400 flex items-center gap-0.5 text-xs"><Check size={12} /> Hoạt động</span>
+                  ) : (
+                    <span className="text-yellow-400 flex items-center gap-0.5 text-xs"><X size={12} /> Trống website</span>
+                  )}
+                </div>
+                <h4 className="text-xs font-semibold text-gray-200">Thêm Website</h4>
+                <p className="text-[10px] text-gray-400 leading-relaxed">Thêm và khởi chạy website đầu tiên trên Nginx Web Server.</p>
+              </div>
+              {!checklist.hasWebsites && (
+                <button onClick={() => setActivePage('webserver')} className="btn btn-glass btn-xs text-yellow-300 w-full mt-2" style={{ fontSize: '10px', padding: '4px' }}>
+                  Tạo Website
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Warning banner fallback if setup wizard not rendered but panel unprotected */}
+      {!checklist && !isPanelProtected && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', padding: '16px', borderRadius: '12px', marginBottom: '24px', color: '#fef3c7', fontSize: '13px', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
             <ShieldCheck size={20} style={{ color: '#fbbf24', flexShrink: 0 }} />

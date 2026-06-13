@@ -7,5 +7,7 @@ router.post('/create', BackupController.createBackup);
 router.post('/restore', BackupController.restoreBackup);
 router.post('/delete', BackupController.deleteBackup);
 router.post('/download', BackupController.downloadBackup);
+router.post('/rclone/install', BackupController.installRclone);
+router.post('/rclone/status', BackupController.checkRcloneStatus);
 
 module.exports = router;

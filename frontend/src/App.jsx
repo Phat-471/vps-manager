@@ -16,6 +16,7 @@ import Terminal from './pages/Terminal';
 import Scripts from './pages/Scripts';
 import Maintenance from './pages/Maintenance';
 import Scheduler from './pages/Scheduler';
+import TrafficStats from './pages/TrafficStats';
 import './index.css';
 
 const pageMap = {
@@ -31,6 +32,7 @@ const pageMap = {
   scripts: <Scripts />,
   maintenance: <Maintenance />,
   scheduler: <Scheduler />,
+  stats: <TrafficStats />,
 };
 
 function AppShell() {

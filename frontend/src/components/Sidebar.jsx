@@ -13,7 +13,8 @@ import {
   TerminalSquare, 
   Play, 
   LogOut,
-  Clock
+  Clock,
+  BarChart2
 } from 'lucide-react';
 
 const MENU_ITEMS = [
@@ -21,6 +22,7 @@ const MENU_ITEMS = [
   { id: 'services', label: 'Cài đặt Dịch vụ', icon: Cpu },
   { id: 'scripts', label: 'Cài nhanh Web/App', icon: TerminalSquare },
   { id: 'webserver', label: 'Web Server', icon: Globe },
+  { id: 'stats', label: 'Thống kê truy cập', icon: BarChart2 },
   { id: 'mysql', label: 'Quản lý MySQL', icon: Database },
   { id: 'applications', label: 'Quản lý Ứng dụng', icon: Layers },
   { id: 'files', label: 'Quản lý File', icon: FolderOpen },

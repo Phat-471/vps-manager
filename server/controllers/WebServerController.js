@@ -48,7 +48,7 @@ async function listSites(req, res) {
 
 async function addSite(req, res) {
     try {
-        const { vpsConfig, domain, root, type, proxyPort } = req.body;
+        const { vpsConfig, domain, root, type, proxyPort, antiDdos = false, blockBots = false } = req.body;
         const safeDomain = sanitizeAlphaNum(domain);
         if (!safeDomain) {
             return res.status(400).json({ success: false, error: 'Domain không hợp lệ' });
@@ -58,6 +58,24 @@ async function addSite(req, res) {
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
+        let securityDirectives = '';
+        if (antiDdos) {
+            // Đảm bảo limit_req_zone toàn cục tồn tại trên VPS
+            await ssh.executeCommand(`
+                if [ ! -f /etc/nginx/conf.d/ddos_limit.conf ]; then
+                    echo "limit_req_zone \\$binary_remote_addr zone=ddos_limit:10m rate=10r/s;" > /etc/nginx/conf.d/ddos_limit.conf
+                fi
+            `);
+            securityDirectives += '\n    limit_req zone=ddos_limit burst=20 nodelay;';
+        }
+        
+        if (blockBots) {
+            securityDirectives += `
+    if ($http_user_agent ~* (SemrushBot|AhrefsBot|MJ12bot|DotBot|Baiduspider|python-requests|curl|wget)) {
+        return 403;
+    }`;
+        }
+
         let config = '';
         if (type === 'php') {
             config = `
@@ -66,6 +84,7 @@ server {
     server_name ${safeDomain};
     root ${root};
     index index.php index.html;
+    ${securityDirectives}
 
     location / {
         try_files $uri $uri/ /index.php?$query_string;
@@ -81,6 +100,7 @@ server {
 server {
     listen 80;
     server_name ${safeDomain};
+    ${securityDirectives}
 
     location / {
         proxy_pass http://localhost:${safePort};
@@ -89,6 +109,9 @@ server {
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }`;
         } else {
@@ -98,6 +121,7 @@ server {
     server_name ${safeDomain};
     root ${root};
     index index.html;
+    ${securityDirectives}
 
     location / {
         try_files $uri $uri/ =404;

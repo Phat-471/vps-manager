@@ -18,6 +18,8 @@ DB_PASS=""
 DEST="${BACKUP_DIR}"
 KEEP=5
 NAME=""
+RCLONE_REMOTE=""
+RCLONE_PATH=""
 
 # Parse arguments
 for arg in "$@"; do
@@ -52,6 +54,14 @@ for arg in "$@"; do
       ;;
     --name=*)
       NAME="\${arg#*=}"
+      shift
+      ;;
+    --rclone-remote=*)
+      RCLONE_REMOTE="\${arg#*=}"
+      shift
+      ;;
+    --rclone-path=*)
+      RCLONE_PATH="\${arg#*=}"
       shift
       ;;
   esac
@@ -145,6 +155,22 @@ EOF
     echo "ERROR: MySQL dump failed."
     rm -f "$TARGET_FILE"
     exit 1
+  fi
+fi
+
+# Rclone Cloud Sync
+if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ] && [ -n "$RCLONE_REMOTE" ]; then
+  echo "Syncing backup file $TARGET_FILE to cloud remote $RCLONE_REMOTE:$RCLONE_PATH..."
+  which rclone &>/dev/null
+  if [ $? -eq 0 ]; then
+    rclone copy "$TARGET_FILE" "\${RCLONE_REMOTE}:\${RCLONE_PATH}"
+    if [ $? -eq 0 ]; then
+      echo "SUCCESS: Cloud sync completed."
+    else
+      echo "WARNING: Cloud sync failed."
+    fi
+  else
+    echo "WARNING: Rclone is not installed. Cloud sync skipped."
   fi
 fi
 `;
@@ -259,6 +285,13 @@ async function createBackup(req, res) {
             command += ` --database=${escapeShellArg(database)}`;
             if (dbUser) command += ` --db-user=${escapeShellArg(dbUser)}`;
             if (dbPass) command += ` --db-pass=${escapeShellArg(dbPass)}`;
+        }
+
+        if (req.body.rcloneRemote) {
+            command += ` --rclone-remote=${escapeShellArg(req.body.rcloneRemote)}`;
+            if (req.body.rclonePath) {
+                command += ` --rclone-path=${escapeShellArg(req.body.rclonePath)}`;
+            }
         }
 
         const result = await ssh.executeCommand(command);
@@ -403,11 +436,62 @@ async function downloadBackup(req, res) {
     }
 }
 
+/**
+ * Cài đặt rclone tự động
+ */
+async function installRclone(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const result = await ssh.executeCommand('curl https://rclone.org/install.sh | bash');
+        
+        res.json({
+            success: true,
+            message: 'Tiến trình cài đặt Rclone đã chạy',
+            log: result.stdout + '\n' + result.stderr
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * Kiểm tra trạng thái cài đặt và config Rclone
+ */
+async function checkRcloneStatus(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const checkInstall = await ssh.executeCommand('which rclone');
+        const installed = checkInstall.code === 0;
+
+        let configured = false;
+        if (installed) {
+            const checkConfig = await ssh.executeCommand('ls /root/.config/rclone/rclone.conf 2>/dev/null');
+            configured = checkConfig.code === 0;
+        }
+
+        res.json({
+            success: true,
+            data: {
+                installed,
+                configured
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listBackups,
     createBackup,
     restoreBackup,
     deleteBackup,
     downloadBackup,
-    RUNNER_PATH // Export path for cron configuration
+    installRclone,
+    checkRcloneStatus,
+    RUNNER_PATH
 };

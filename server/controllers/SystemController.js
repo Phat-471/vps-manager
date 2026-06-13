@@ -488,6 +488,52 @@ async function changeRootPassword(req, res) {
     }
 }
 
+/**
+ * Lấy danh sách kiểm tra cấu hình VPS lần đầu
+ */
+async function getSetupChecklist(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        // 1. Kiểm tra Cổng SSH
+        const sshdResult = await ssh.executeCommand("grep -i '^port ' /etc/ssh/sshd_config 2>/dev/null || echo 'Port 22'");
+        const portMatch = sshdResult.stdout.match(/port\s+(\d+)/i);
+        const sshPort = portMatch ? parseInt(portMatch[1]) : 22;
+        const isDefaultSSHPort = sshPort === 22;
+
+        // 2. Kiểm tra phần mềm Nginx & MySQL
+        const nginxCheck = await ssh.executeCommand('which nginx');
+        const mysqlCheck = await ssh.executeCommand('which mysql');
+        const hasNginx = nginxCheck.code === 0;
+        const hasMySQL = mysqlCheck.code === 0;
+
+        // 3. Kiểm tra lập lịch sao lưu trong cron
+        const cronResult = await ssh.executeCommand('crontab -l 2>/dev/null || true');
+        const hasBackupSchedules = cronResult.stdout.includes('[BACKUP]');
+
+        // 4. Kiểm tra website đang chạy
+        const sitesResult = await ssh.executeCommand('ls -1 /etc/nginx/sites-enabled 2>/dev/null || true');
+        const activeSites = sitesResult.stdout.trim().split('\n').filter(s => s && s !== 'default' && s.trim());
+        const hasWebsites = activeSites.length > 0;
+
+        res.json({
+            success: true,
+            data: {
+                isPanelProtected: !!process.env.PANEL_PASSWORD,
+                isDefaultSSHPort,
+                sshPort,
+                hasNginx,
+                hasMySQL,
+                hasBackupSchedules,
+                hasWebsites
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getSystemInfo,
     getCPUInfo,
@@ -502,5 +548,6 @@ module.exports = {
     rebootVPS,
     cleanSystemCache,
     cleanSystemLogs,
-    changeRootPassword
+    changeRootPassword,
+    getSetupChecklist
 };

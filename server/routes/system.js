@@ -23,5 +23,6 @@ router.post('/reboot', SystemController.rebootVPS);
 router.post('/clean-cache', SystemController.cleanSystemCache);
 router.post('/clean-logs', SystemController.cleanSystemLogs);
 router.post('/change-password', SystemController.changeRootPassword);
+router.post('/setup-check', SystemController.getSetupChecklist);
 
 module.exports = router;

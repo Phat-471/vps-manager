@@ -38,6 +38,13 @@ export default function Scheduler() {
   const [showRestoreModal, setShowRestoreModal] = useState(false);
   const [selectedBackup, setSelectedBackup] = useState(null);
 
+  // Rclone states
+  const [rcloneStatus, setRcloneStatus] = useState({ installed: false, configured: false });
+  const [rcloneLoading, setRcloneLoading] = useState(false);
+  const [useRclone, setUseRclone] = useState(false);
+  const [rcloneRemote, setRcloneRemote] = useState('');
+  const [rclonePath, setRclonePath] = useState('');
+
   // Form states for Cron Job
   const [cronName, setCronName] = useState('');
   const [cronSchedule, setCronSchedule] = useState('0 2 * * *');
@@ -77,6 +84,7 @@ export default function Scheduler() {
       } else if (activeTab === 'backup') {
         const fileRes = await apiCall('/api/backups/list', 'POST');
         setBackupFiles(fileRes.data || []);
+        fetchRcloneStatus();
         
         // Fetch databases list for backup dropdown
         try {
@@ -200,6 +208,51 @@ export default function Scheduler() {
     }
   };
 
+  // Rclone logic
+  const fetchRcloneStatus = async () => {
+    try {
+      const res = await apiCall('/api/backups/rclone/status', 'POST');
+      if (res.success && res.data) {
+        setRcloneStatus(res.data);
+      }
+    } catch (err) {
+      console.error('Lỗi check rclone status:', err);
+    }
+  };
+
+  const handleInstallRclone = async () => {
+    setRcloneLoading(true);
+    showToast('Đang khởi chạy tiến trình cài đặt Rclone trên VPS...', 'info');
+    try {
+      const res = await apiCall('/api/backups/rclone/install', 'POST');
+      if (res.success) {
+        showToast('Đã gửi lệnh cài đặt Rclone thành công!', 'success');
+        let output = `[Exit Code: 0]\n`;
+        if (res.log) output += `STDOUT & STDERR:\n${res.log}\n`;
+        setRunLog(output);
+        fetchRcloneStatus();
+      }
+    } catch (err) {
+      showToast('Lỗi khi cài đặt Rclone: ' + err.message, 'error');
+    } finally {
+      setRcloneLoading(false);
+    }
+  };
+
+  const handleOpenBackupModal = (manual) => {
+    setIsManualBackup(manual);
+    setBackupType('dir');
+    setBackupSourceDir('/var/www/');
+    setBackupDatabase(databases.length > 0 ? databases[0] : '');
+    setBackupCustomName('');
+    setBackupKeepCount(5);
+    setBackupFrequency('daily');
+    setUseRclone(false);
+    setRcloneRemote('');
+    setRclonePath('');
+    setShowBackupModal(true);
+  };
+
   // Backups Helpers
   // Filter Cron Jobs to get backups schedules
   const getBackupSchedules = () => {
@@ -258,6 +311,13 @@ export default function Scheduler() {
       if (backupDbPass) command += ` --db-pass=${backupDbPass}`;
     }
 
+    if (useRclone && rcloneRemote.trim()) {
+      command += ` --rclone-remote=${rcloneRemote.trim()}`;
+      if (rclonePath.trim()) {
+        command += ` --rclone-path=${rclonePath.trim()}`;
+      }
+    }
+
     try {
       if (isManualBackup) {
         // Run manual backup immediately
@@ -274,6 +334,10 @@ export default function Scheduler() {
           bodyData.database = backupDatabase;
           bodyData.dbUser = backupDbUser;
           bodyData.dbPass = backupDbPass;
+        }
+        if (useRclone && rcloneRemote.trim()) {
+          bodyData.rcloneRemote = rcloneRemote.trim();
+          bodyData.rclonePath = rclonePath.trim();
         }
 
         const res = await apiCall('/api/backups/create', 'POST', bodyData);
@@ -388,13 +452,13 @@ export default function Scheduler() {
           ) : (
             <div style={{ display: 'flex', gap: '8px' }}>
               <button 
-                onClick={() => { setIsManualBackup(true); setBackupType('dir'); setShowBackupModal(true); }} 
+                onClick={() => handleOpenBackupModal(true)} 
                 className="btn btn-glass flex items-center gap-2 text-green-300"
               >
                 <Plus size={16} /> Sao lưu thủ công
               </button>
               <button 
-                onClick={() => { setIsManualBackup(false); setBackupType('dir'); setShowBackupModal(true); }} 
+                onClick={() => handleOpenBackupModal(false)} 
                 className="btn btn-primary flex items-center gap-2"
               >
                 <Clock size={16} /> Thêm lịch sao lưu
@@ -673,6 +737,64 @@ export default function Scheduler() {
               </table>
             </div>
           </div>
+
+          {/* Section C: Cloud Sync (Rclone) */}
+          <div className="card-glass p-6 rounded-xl space-y-4">
+            <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 className="text-lg font-semibold flex items-center gap-2 text-gray-200">
+                  <RefreshCw size={18} className="text-indigo-400" />
+                  Đồng bộ đám mây (Rclone Cloud Sync)
+                </h2>
+                <p className="text-xs text-gray-400 font-normal">Tự động đẩy các bản sao lưu mới lên Google Drive, OneDrive, S3, Dropbox... sau khi nén.</p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {!rcloneStatus.installed && (
+                  <button 
+                    onClick={handleInstallRclone} 
+                    disabled={rcloneLoading}
+                    className="btn btn-glass btn-sm text-yellow-400"
+                  >
+                    {rcloneLoading ? 'Đang cài đặt...' : 'Cài đặt Rclone'}
+                  </button>
+                )}
+                <button 
+                  onClick={fetchRcloneStatus} 
+                  disabled={rcloneLoading}
+                  className="btn btn-glass btn-sm"
+                >
+                  Kiểm tra trạng thái
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
+              <div className="p-4 bg-white/5 rounded-lg border border-white/5 space-y-2">
+                <span className="text-xs font-semibold text-gray-400 uppercase">Trạng thái Rclone</span>
+                <div className="flex flex-col gap-1.5 pt-1">
+                  <div className="flex justify-between text-xs text-gray-300">
+                    <span className="text-gray-400">Đã cài đặt:</span>
+                    <span className={rcloneStatus.installed ? 'text-green-400 font-bold' : 'text-red-400'}>
+                      {rcloneStatus.installed ? '✔ Đã cài đặt' : '✘ Chưa cài đặt'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-300">
+                    <span className="text-gray-400">Đã liên kết Cloud:</span>
+                    <span className={rcloneStatus.configured ? 'text-green-400 font-bold' : 'text-yellow-400'}>
+                      {rcloneStatus.configured ? '✔ Sẵn sàng' : '✘ Chưa cấu hình Remote'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 bg-white/5 rounded-lg border border-white/5 text-xs text-gray-300 space-y-1.5 leading-relaxed font-normal">
+                <span className="text-xs font-semibold text-gray-400 uppercase block mb-1">Hướng dẫn cấu hình Remote</span>
+                <p>1. SSH vào VPS và chạy lệnh: <code className="bg-black/40 px-1.5 py-0.5 rounded font-mono text-indigo-300">rclone config</code></p>
+                <p>2. Tạo một Remote mới (ví dụ tên là: <code className="text-yellow-300">gdrive</code> hoặc <code className="text-yellow-300">s3</code>) và liên kết tài khoản.</p>
+                <p>3. Điền tên Remote đã đặt vào mục sao lưu bên dưới để tự động đồng bộ.</p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -941,6 +1063,48 @@ export default function Scheduler() {
                   </select>
                 </div>
               )}
+
+              {/* Rclone Cloud Integration Checkbox & Fields */}
+              <div className="space-y-3 pt-3 border-t border-white/5">
+                <label className="text-xs text-indigo-300 font-semibold uppercase tracking-wider block">Đồng bộ đám mây (Cloud Sync)</label>
+                <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={useRclone} 
+                    onChange={e => setUseRclone(e.target.checked)} 
+                    className="rounded bg-white/5 border-white/10 text-indigo-500 focus:ring-0 focus:ring-offset-0"
+                  />
+                  Đồng bộ lên Cloud (Yêu cầu đã config Rclone)
+                </label>
+
+                {useRclone && (
+                  <div className="space-y-2 pt-1.5" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div className="space-y-1">
+                      <label className="text-gray-400 font-medium text-xs">Tên Remote Rclone:</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="vd: gdrive"
+                        value={rcloneRemote}
+                        onChange={(e) => setRcloneRemote(e.target.value)}
+                        className="input-glass w-full"
+                        style={{ padding: '6px', fontSize: '12px' }}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-gray-400 font-medium text-xs">Thư mục đích trên Cloud:</label>
+                      <input
+                        type="text"
+                        placeholder="vd: /backups"
+                        value={rclonePath}
+                        onChange={(e) => setRclonePath(e.target.value)}
+                        className="input-glass w-full"
+                        style={{ padding: '6px', fontSize: '12px' }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-white/5" style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px' }}>
                 <button
