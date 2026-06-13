@@ -15,7 +15,8 @@ import {
   LogOut,
   Clock,
   BarChart2,
-  Bell
+  Bell,
+  Sliders
 } from 'lucide-react';
 
 const MENU_ITEMS = [
@@ -24,6 +25,7 @@ const MENU_ITEMS = [
   { id: 'scripts', label: 'Cài nhanh Web/App', icon: TerminalSquare },
   { id: 'webserver', label: 'Web Server', icon: Globe },
   { id: 'stats', label: 'Thống kê truy cập', icon: BarChart2 },
+  { id: 'phpconfig', label: 'Cấu hình PHP', icon: Sliders },
   { id: 'mysql', label: 'Quản lý MySQL', icon: Database },
   { id: 'applications', label: 'Quản lý Ứng dụng', icon: Layers },
   { id: 'files', label: 'Quản lý File', icon: FolderOpen },
