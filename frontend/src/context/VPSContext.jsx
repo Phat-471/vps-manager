@@ -177,6 +177,32 @@ export const VPSProvider = ({ children }) => {
     showToast('Đã đăng xuất khỏi Panel', 'info');
   };
 
+  const setupPanel = async (password) => {
+    try {
+      const response = await fetch('/api/auth/setup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ password })
+      });
+      const result = await response.json();
+      if (response.ok && result.success) {
+        localStorage.setItem('panelToken', result.token);
+        setPanelToken(result.token);
+        setIsPanelProtected(true);
+        setIsPanelAuthenticated(true);
+        showToast('Thiết lập mật khẩu bảo mật Panel thành công', 'success');
+        return { success: true };
+      } else {
+        throw new Error(result.error || 'Thiết lập mật khẩu thất bại');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+      return { success: false, error: err.message };
+    }
+  };
+
   // REST API Wrapper
   const apiCall = async (endpoint, method = 'GET', data = null) => {
     const token = localStorage.getItem('panelToken');
@@ -246,7 +272,8 @@ export const VPSProvider = ({ children }) => {
       isPanelAuthenticated,
       authChecked,
       loginPanel,
-      logoutPanel
+      logoutPanel,
+      setupPanel
     }}>
       {children}
     </VPSContext.Provider>

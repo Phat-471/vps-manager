@@ -82,8 +82,59 @@ function login(req, res) {
     }
 }
 
+/**
+ * Thiết lập mật khẩu ban đầu cho Panel
+ */
+function setup(req, res) {
+    try {
+        const { password } = req.body;
+        const fs = require('fs');
+        const path = require('path');
+        
+        if (process.env.PANEL_PASSWORD) {
+            return res.status(400).json({ success: false, error: 'Panel đã được thiết lập mật khẩu bảo mật trước đó.' });
+        }
+
+        if (!password || password.trim().length < 6) {
+            return res.status(400).json({ success: false, error: 'Mật khẩu phải tối thiểu từ 6 ký tự trở lên.' });
+        }
+
+        // Ghi mật khẩu vào file .env
+        const envPath = path.join(__dirname, '../../.env');
+        let envContent = '';
+        if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+        }
+
+        const lines = envContent.split('\n');
+        let found = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.startsWith('PANEL_PASSWORD=')) {
+                lines[i] = `PANEL_PASSWORD=${password.trim()}`;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            lines.push(`PANEL_PASSWORD=${password.trim()}`);
+        }
+        
+        fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
+        process.env.PANEL_PASSWORD = password.trim();
+
+        // Tạo token đăng nhập mới luôn cho phiên làm việc hiện tại
+        const token = generateToken();
+
+        return res.json({ success: true, message: 'Thiết lập mật khẩu bảo mật Panel thành công', token });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     checkStatus,
     login,
+    setup,
     verifyToken
 };

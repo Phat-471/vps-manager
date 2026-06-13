@@ -4,7 +4,7 @@ import Topbar from '../components/Topbar';
 import { RotateCw, Power, Cpu, Trash2, Key, ShieldCheck, X } from 'lucide-react';
 
 export default function Dashboard() {
-  const { socket, apiCall, showToast, isConnected, currentVPS } = useVPS();
+  const { socket, apiCall, showToast, isConnected, currentVPS, isPanelProtected, setupPanel } = useVPS();
   const [cpu, setCpu] = useState(0);
   const [ram, setRam] = useState({ usage: 0, total: 'Đang tải...', used: 'Đang tải...' });
   const [disk, setDisk] = useState({ usage: 0, total: 'Đang tải...', used: 'Đang tải...' });
@@ -22,6 +22,12 @@ export default function Dashboard() {
   const [showPwdModal, setShowPwdModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Panel Setup Password states
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [setupPassword, setSetupPassword] = useState('');
+  const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
+  const [setupLoading, setSetupLoading] = useState(false);
 
 
   const loadStaticData = async () => {
@@ -125,6 +131,31 @@ export default function Dashboard() {
     }
   };
 
+  const handleSetupPassword = async (e) => {
+    e.preventDefault();
+    if (setupPassword !== setupConfirmPassword) {
+      showToast('Mật khẩu nhập lại không khớp!', 'warning');
+      return;
+    }
+    if (setupPassword.length < 6) {
+      showToast('Mật khẩu phải tối thiểu 6 ký tự!', 'warning');
+      return;
+    }
+    setSetupLoading(true);
+    try {
+      const result = await setupPanel(setupPassword);
+      if (result.success) {
+        setShowSetupModal(false);
+        setSetupPassword('');
+        setSetupConfirmPassword('');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSetupLoading(false);
+    }
+  };
+
 
   useEffect(() => {
     if (!isConnected) return;
@@ -198,6 +229,21 @@ export default function Dashboard() {
           <RotateCw size={14} /> Làm mới
         </button>
       </Topbar>
+
+      {!isPanelProtected && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', padding: '16px', borderRadius: '12px', marginBottom: '24px', color: '#fef3c7', fontSize: '13px', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+            <ShieldCheck size={20} style={{ color: '#fbbf24', flexShrink: 0 }} />
+            <div>
+              <strong style={{ display: 'block', color: '#f59e0b', fontWeight: '700', marginBottom: '2px' }}>Cảnh báo bảo mật: Panel chưa được đặt mật khẩu</strong>
+              <span>Bảng điều khiển của bạn hiện đang mở tự do cho bất kỳ ai biết địa chỉ IP này. Vui lòng thiết lập mật khẩu bảo vệ để tránh rủi ro xâm nhập VPS trái phép.</span>
+            </div>
+          </div>
+          <button className="btn" onClick={() => setShowSetupModal(true)} style={{ flexShrink: 0, background: 'rgba(245,158,11,0.2)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '600' }}>
+            Đặt mật khẩu ngay
+          </button>
+        </div>
+      )}
 
       <div className="stats-grid">
         {/* CPU Progress */}
@@ -402,6 +448,54 @@ export default function Dashboard() {
               <div className="modal-footer">
                 <button type="button" className="btn btn-glass" onClick={() => setShowPwdModal(false)}>Hủy</button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>Lưu mật khẩu</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Panel Setup Password Modal */}
+      {showSetupModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ width: '450px' }}>
+            <div className="modal-header">
+              <h2>Thiết lập mật khẩu bảo mật Panel</h2>
+              <button onClick={() => setShowSetupModal(false)} className="modal-close-btn"><X size={18} /></button>
+            </div>
+            <form onSubmit={handleSetupPassword}>
+              <div className="modal-body space-y-4">
+                <p className="text-xs text-gray-400 mb-2">
+                  Đặt mật khẩu để khóa bảng điều khiển này. Sau khi lưu, bạn sẽ cần đăng nhập bằng mật khẩu này để truy cập tất cả tính năng quản trị từ xa.
+                </p>
+                <div className="form-group">
+                  <label>Mật khẩu Panel mới</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Mật khẩu mới (tối thiểu 6 ký tự)"
+                    value={setupPassword}
+                    onChange={(e) => setSetupPassword(e.target.value)}
+                    className="input-glass"
+                    autoFocus
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Nhập lại mật khẩu</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Nhập lại mật khẩu Panel"
+                    value={setupConfirmPassword}
+                    onChange={(e) => setSetupConfirmPassword(e.target.value)}
+                    className="input-glass"
+                  />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-glass" onClick={() => setShowSetupModal(false)}>Hủy</button>
+                <button type="submit" className="btn btn-primary" disabled={setupLoading}>
+                  {setupLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Kích hoạt bảo mật'}
+                </button>
               </div>
             </form>
           </div>
