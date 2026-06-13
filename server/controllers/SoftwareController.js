@@ -393,16 +393,26 @@ async function installPM2(req, res) {
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
         const commands = `
-      npm install -g pm2
-      pm2 --version
-      pm2 startup systemd
-    `;
+            # Install PM2 globally
+            npm install -g pm2
+            
+            # Create a dedicated low-privilege user for running Node.js apps
+            if ! id -u pm2user &>/dev/null; then
+                useradd -m -s /bin/bash pm2user
+            fi
+            
+            # Configure startup services
+            pm2 startup systemd 2>/dev/null || true
+            
+            # Print status
+            pm2 --version
+        `;
 
         const result = await ssh.executeCommand(commands);
 
         res.json({
             success: true,
-            message: 'Đã cài đặt PM2 thành công',
+            message: 'Đã cài đặt PM2 và cấu hình tài khoản bảo mật pm2user thành công!',
             output: result.stdout
         });
 

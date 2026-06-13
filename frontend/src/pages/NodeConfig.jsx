@@ -1,14 +1,15 @@
+
 import React, { useState, useEffect } from 'react';
 import { useVPS } from '../context/VPSContext';
 import Topbar from '../components/Topbar';
-import { 
-  Cpu, 
-  RotateCw, 
-  Check, 
-  Download, 
-  AlertTriangle, 
-  Info, 
-  Globe, 
+import {
+  Cpu,
+  RotateCw,
+  Check,
+  Download,
+  AlertTriangle,
+  Info,
+  Globe,
   Terminal,
   Server
 } from 'lucide-react';
@@ -22,7 +23,7 @@ export default function NodeConfig() {
     nodeVersion: '',
     npmVersion: ''
   });
-  
+
   const [versionsData, setVersionsData] = useState({
     current: '',
     default: '',
@@ -73,7 +74,7 @@ export default function NodeConfig() {
 
   const handleInstallNVM = async () => {
     if (!window.confirm('Bạn có chắc chắn muốn cài đặt NVM (Node Version Manager) trên máy chủ này?')) return;
-    
+
     setInstallingNvm(true);
     showToast('Đang tiến hành tải và cài đặt NVM...', 'info');
     try {
@@ -192,8 +193,8 @@ export default function NodeConfig() {
               </p>
             </div>
 
-            <button 
-              onClick={handleInstallNVM} 
+            <button
+              onClick={handleInstallNVM}
               disabled={installingNvm}
               className="btn btn-primary w-full py-3 flex items-center justify-center gap-2 font-semibold"
               style={{ maxWidth: '300px', margin: '0 auto' }}
@@ -258,7 +259,7 @@ export default function NodeConfig() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '24px' }}>
-            
+
             {/* CỘT TRÁI: PHIÊN BẢN ĐÃ CÀI ĐẶT CỤC BỘ */}
             <div className="space-y-6">
               <div className="card-glass p-6 rounded-xl space-y-4">
@@ -324,8 +325,8 @@ export default function NodeConfig() {
                         className="input-glass flex-grow"
                         style={{ padding: '8px', fontSize: '12px' }}
                       />
-                      <button 
-                        type="submit" 
+                      <button
+                        type="submit"
                         disabled={actionVersion !== null || !customVersion.trim()}
                         className="btn btn-primary flex items-center gap-1.5 text-xs font-semibold"
                         style={{ padding: '8px 16px' }}

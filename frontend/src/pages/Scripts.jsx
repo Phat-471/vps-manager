@@ -25,6 +25,9 @@ const SCRIPT_LIST = [
   { id: 'sysctl_hardening', name: 'Bảo mật Kernel (Sysctl)', icon: ShieldCheck, color: '#10b981', desc: 'Tối ưu hóa nhân Kernel chống tấn công SYN flood, IP spoofing, chặn ICMP redirects.' },
   { id: 'auto_updates', name: 'Tự cập nhật Bảo mật', icon: ShieldAlert, color: '#3b82f6', desc: 'Cấu hình tự động cài đặt các bản vá lỗi bảo mật khẩn cấp hàng ngày trên VPS.' },
   { id: 'clamav_scan', name: 'Quét mã độc ClamAV', icon: Activity, color: '#ef4444', desc: 'Cài đặt và quét virus/backdoor toàn bộ mã nguồn web tại thư mục /var/www.' },
+  { id: 'ddos_deflate', name: 'Chặn DDoS tự động (DDoS Deflate)', icon: ShieldCheck, color: '#ef4444', desc: 'Tự động cài đặt script chạy ngầm quét kết nối. IP vượt quá 150 kết nối đồng thời sẽ bị UFW block ngay lập tức.' },
+  { id: 'block_bad_bots', name: 'Chặn Bot rác Nginx (Global Bot Blocker)', icon: ShieldAlert, color: '#ff9800', desc: 'Cấu hình bản đồ chặn các tác nhân User-Agent xấu, spam crawler (Ahrefs, Semrush...) toàn hệ thống Nginx.' },
+  { id: 'fail2ban_nginx', name: 'Fail2Ban Nginx Protection', icon: ShieldCheck, color: '#3b82f6', desc: 'Kích hoạt Fail2Ban bảo vệ Nginx, tự động phân tích log file để ban IP spam request, ddos, brute-force.' },
   
   // Cài đặt nhanh Web & App
   { id: 'wordpress', name: 'Cài nhanh WordPress', icon: Globe, color: '#10b981', desc: 'Tự động tải về WordPress mới nhất, tạo CSDL MySQL + User, cấu hình Nginx Virtual Host chỉ trong 1 click.', needsArgs: true },

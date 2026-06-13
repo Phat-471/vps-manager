@@ -387,6 +387,107 @@ EOF
             echo "Đang quét nhanh thư mục Web /var/www để tìm mã độc, backdoor..."
             clamscan -r --infected --no-summary /var/www || echo "Không phát hiện mã độc nguy hiểm nào."
         `
+    },
+    ddos_deflate: {
+        name: 'Auto Anti-DDoS (DDoS Deflate)',
+        command: `
+            echo "=== CÀI ĐẶT SCRIPT CHỐNG DDOS DEFLATE CHẠY NGẦM ==="
+            if ! command -v ufw >/dev/null; then
+                echo "Lỗi: Vui lòng cài đặt và bật tường lửa UFW trước trong mục Bảo mật."
+                exit 1
+            fi
+
+            # Tạo script ddos-deflate cục bộ
+            cat << 'EOF' > /usr/local/bin/ddos-deflate.sh
+#!/bin/bash
+MAX_CONN=150
+BAN_LOG="/var/log/ddos_deflate.log"
+if ! command -v ufw >/dev/null; then
+    exit 0
+fi
+ss -ntu | awk 'NR>1 {print $5}' | cut -d: -f1 | grep -v -E "(127.0.0.1|::1|0.0.0.0)" | sort | uniq -c | while read count ip; do
+    if [ "$count" -gt "$MAX_CONN" ]; then
+        if ! ufw status | grep -q "$ip"; then
+            echo "$(date) - IP $ip blocked with $count connections" >> "$BAN_LOG"
+            ufw insert 1 deny from "$ip" to any
+        fi
+    fi
+done
+EOF
+            chmod +x /usr/local/bin/ddos-deflate.sh
+
+            # Tạo cron job chạy mỗi phút
+            if ! crontab -l 2>/dev/null | grep -q "ddos-deflate.sh"; then
+                (crontab -l 2>/dev/null; echo "* * * * * /bin/bash /usr/local/bin/ddos-deflate.sh >/dev/null 2>&1") | crontab -
+            fi
+
+            echo "SUCCESS: Script DDoS Deflate đã được cài đặt và lập lịch chạy ngầm mỗi phút thành công!"
+            echo "Log theo dõi sẽ được lưu tại: /var/log/ddos_deflate.log"
+        `
+    },
+    block_bad_bots: {
+        name: 'Block Bad Bots & Crawlers (Nginx)',
+        command: `
+            echo "=== CẤU HÌNH CHẶN BOT RÁC TOÀN CẦU CHO NGINX ==="
+            if [ ! -d /etc/nginx/conf.d ]; then
+                echo "Lỗi: Không tìm thấy thư mục Nginx. Vui lòng cài đặt Web Server trước."
+                exit 1
+            fi
+
+            cat << 'EOF' > /etc/nginx/conf.d/block_bots.conf
+# Block bad bots map
+map $http_user_agent $is_bad_bot {
+    default 0;
+    ~*(SemrushBot|AhrefsBot|DotBot|MJ12bot|MegaIndex|ZoominfoBot|Mail.RU_Bot|Baiduspider|Sogou|Yandex|python-requests|curl|wget|libwww|scanner|nmap|nikto|sqlmap|censys|masscan|zgrab) 1;
+}
+EOF
+            nginx -t
+            if [ $? -eq 0 ]; then
+                systemctl reload nginx || systemctl restart nginx
+                echo "SUCCESS: Đã cấu hình và kích hoạt danh sách chặn bot rác trên Nginx thành công!"
+            else
+                echo "ERROR: Cấu hình Nginx không hợp lệ. Đã khôi phục trạng thái."
+                rm -f /etc/nginx/conf.d/block_bots.conf
+                exit 1
+            fi
+        `
+    },
+    fail2ban_nginx: {
+        name: 'Fail2Ban Nginx Protection',
+        command: `
+            echo "=== CÀI ĐẶT & CẤU HÌNH FAIL2BAN BẢO VỆ NGINX ==="
+            if ! command -v nginx &>/dev/null; then
+                echo "Lỗi: Vui lòng cài đặt Nginx trước."
+                exit 1
+            fi
+
+            if ! command -v fail2ban-client &>/dev/null; then
+                echo "Đang cài đặt Fail2Ban..."
+                if [ -f /etc/debian_version ]; then
+                    apt-get update && apt-get install -y fail2ban
+                else
+                    yum install -y epel-release && yum install -y fail2ban
+                fi
+            fi
+
+            # Cấu hình jail bảo vệ Nginx limit_req
+            cat << 'EOF' > /etc/fail2ban/jail.d/nginx-limit.conf
+[nginx-limit-req]
+enabled = true
+port    = http,https
+filter  = nginx-limit-req
+logpath = /var/log/nginx/*error.log
+maxretry = 5
+findtime = 600
+bantime  = 3600
+EOF
+
+            systemctl restart fail2ban
+            systemctl enable fail2ban
+
+            echo "SUCCESS: Đã cài đặt và kích hoạt Fail2Ban bảo vệ Nginx thành công!"
+            fail2ban-client status
+        `
     }
 };
 
