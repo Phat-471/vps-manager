@@ -1,0 +1,30 @@
+{
+  "name": "vps-management-tool",
+  "version": "1.0.0",
+  "description": "Công cụ quản lý VPS dễ dàng cho người mới bắt đầu",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "nodemon server/server.js"
+  },
+  "keywords": [
+    "vps",
+    "server-management",
+    "ssh",
+    "linux"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ssh2": "^1.15.0",
+    "socket.io": "^4.6.1",
+    "multer": "^1.4.5-lts.1",
+    "mime-types": "^2.1.35",
+    "crypto-js": "^4.2.0",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
