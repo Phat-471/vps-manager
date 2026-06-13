@@ -22,12 +22,15 @@ const SCRIPT_LIST = [
   { id: 'bench', name: 'Bench Hiệu năng', icon: Cpu, color: '#ff9800', desc: 'Kiểm tra thông số phần cứng, tốc độ ổ cứng (IOPS) và mạng quốc tế.' },
   { id: 'warp', name: 'Cloudflare WARP', icon: ShieldAlert, color: '#673ab7', desc: 'Fake IP hoặc ẩn danh cho server thông qua mạng lưới của Cloudflare.' },
   { id: 'health', name: 'Check System Health', icon: Activity, color: '#607d8b', desc: 'Kiểm tra tổng quát sức khỏe hệ thống và các lỗi tiềm ẩn.' },
+  { id: 'sysctl_hardening', name: 'Bảo mật Kernel (Sysctl)', icon: ShieldCheck, color: '#10b981', desc: 'Tối ưu hóa nhân Kernel chống tấn công SYN flood, IP spoofing, chặn ICMP redirects.' },
+  { id: 'auto_updates', name: 'Tự cập nhật Bảo mật', icon: ShieldAlert, color: '#3b82f6', desc: 'Cấu hình tự động cài đặt các bản vá lỗi bảo mật khẩn cấp hàng ngày trên VPS.' },
+  { id: 'clamav_scan', name: 'Quét mã độc ClamAV', icon: Activity, color: '#ef4444', desc: 'Cài đặt và quét virus/backdoor toàn bộ mã nguồn web tại thư mục /var/www.' },
   
   // Cài đặt nhanh Web & App
   { id: 'wordpress', name: 'Cài nhanh WordPress', icon: Globe, color: '#10b981', desc: 'Tự động tải về WordPress mới nhất, tạo CSDL MySQL + User, cấu hình Nginx Virtual Host chỉ trong 1 click.', needsArgs: true },
   { id: 'phpmyadmin', name: 'Cài nhanh phpMyAdmin', icon: Database, color: '#06b6d4', desc: 'Triển khai trình quản lý CSDL trực quan phpMyAdmin qua giao diện Web cổng 8888 của Nginx.' },
   { id: 'portainer', name: 'Cài Portainer (Docker GUI)', icon: ShieldCheck, color: '#a855f7', desc: 'Khởi chạy Portainer Dashboard GUI để dễ dàng quản lý các container Docker trực quan bằng Web UI.' },
-  { id: 'nodeapp', name: 'Deploy Node.js từ Git', icon: Terminal, color: '#fbbf24', desc: 'Tự động clone code từ Git (HTTPS), cài NPM dependencies và khởi chạy tiến trình PM2 tự động.', needsArgs: true }
+  { id: 'nodeapp', name: 'Deploy Node.js bảo mật', icon: Terminal, color: '#fbbf24', desc: 'Tự động clone code từ Git, cài NPM dependencies và chạy nền PM2 dưới user không có root (pm2user).', needsArgs: true }
 ];
 
 export default function Scripts() {

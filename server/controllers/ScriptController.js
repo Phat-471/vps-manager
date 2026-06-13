@@ -249,13 +249,13 @@ EOF
         `
     },
     nodeapp: {
-        name: 'Auto Deploy Node.js Project from Git',
+        name: 'Auto Deploy Node.js Project (PM2 Safe Mode)',
         command: `
             APP_NAME="{{APP_NAME}}"
             GIT_URL="{{GIT_URL}}"
             PORT="{{PORT}}"
 
-            echo "=== BẮT ĐẦU AUTO-DEPLOY NODEJS APP: \${APP_NAME} ==="
+            echo "=== BẮT ĐẦU AUTO-DEPLOY NODEJS APP BẢO MẬT: \${APP_NAME} ==="
 
             # Check Git & NodeJS
             if ! command -v git &> /dev/null || ! command -v node &> /dev/null; then
@@ -278,13 +278,21 @@ EOF
             echo "2. Cài đặt các thư viện npm..."
             npm install --production || npm install
 
-            echo "3. Cấu hình PM2..."
+            echo "3. Cấu hình PM2 bảo mật..."
             if ! command -v pm2 &> /dev/null; then
                 echo "Đang cài đặt PM2 toàn cục..."
                 npm install -g pm2
             fi
 
-            echo "4. Khởi chạy ứng dụng với PM2..."
+            # Tạo user pm2user không có quyền root nếu chưa có
+            if ! id -u pm2user &>/dev/null; then
+                echo "Tạo tài khoản hệ thống 'pm2user' để chạy ứng dụng độc lập..."
+                useradd -m -s /bin/bash pm2user
+            fi
+
+            # Phân quyền cho pm2user
+            chown -R pm2user:pm2user /var/www/\${APP_NAME}
+
             # Tìm file chạy chính
             START_FILE="index.js"
             if [ ! -f "index.js" ] && [ -f "server.js" ]; then
@@ -293,18 +301,91 @@ EOF
                 START_FILE="app.js"
             fi
 
-            pm2 stop \th_app_placeholder 2>/dev/null || true
-            pm2 delete \th_app_placeholder 2>/dev/null || true
-            # Chạy pm2 xóa app cũ
+            # Dừng các app cũ
             pm2 stop \${APP_NAME} 2>/dev/null || true
             pm2 delete \${APP_NAME} 2>/dev/null || true
+            sudo -u pm2user pm2 stop \${APP_NAME} 2>/dev/null || true
+            sudo -u pm2user pm2 delete \${APP_NAME} 2>/dev/null || true
 
-            PORT=\${PORT} pm2 start \${START_FILE} --name \${APP_NAME} || PORT=\${PORT} pm2 start npm --name \${APP_NAME} -- start
-            pm2 save --force
+            echo "4. Khởi chạy ứng dụng bằng PM2 dưới tài khoản pm2user..."
+            sudo -u pm2user env PORT=\${PORT} pm2 start \${START_FILE} --name \${APP_NAME} || sudo -u pm2user env PORT=\${PORT} pm2 start npm --name \${APP_NAME} -- start
+            sudo -u pm2user pm2 save --force
 
             echo "=== AUTO-DEPLOY NODEJS APP HOÀN TẤT ==="
-            echo "Ứng dụng đang hoạt động tại cổng: \${PORT}."
-            pm2 status \${APP_NAME}
+            echo "Ứng dụng đang hoạt động bảo mật tại cổng: \${PORT}."
+            sudo -u pm2user pm2 status \${APP_NAME}
+        `
+    },
+    sysctl_hardening: {
+        name: 'Kernel Network Hardening (Sysctl)',
+        command: `
+            echo "=== TỐI ƯU HÓA KERNEL BẢO MẬT (SYSCTL) ==="
+            SYSCTL_CONF="/etc/sysctl.d/99-security-hardening.conf"
+            cat << 'EOF' > $SYSCTL_CONF
+            # Prevent SYN flood attacks
+            net.ipv4.tcp_syncookies = 1
+            net.ipv4.tcp_syn_retries = 5
+            net.ipv4.tcp_synack_retries = 2
+            net.ipv4.tcp_max_syn_backlog = 4096
+
+            # Disallow IP source routing
+            net.ipv4.conf.all.accept_source_route = 0
+            net.ipv4.conf.default.accept_source_route = 0
+
+            # Disallow ICMP redirects
+            net.ipv4.conf.all.accept_redirects = 0
+            net.ipv4.conf.default.accept_redirects = 0
+            net.ipv4.conf.all.secure_redirects = 0
+            net.ipv4.conf.default.secure_redirects = 0
+
+            # Ignore broadcast pings
+            net.ipv4.icmp_echo_ignore_broadcasts = 1
+
+            # Enable IP spoofing protection (Reverse Path Filtering)
+            net.ipv4.conf.all.rp_filter = 1
+            net.ipv4.conf.default.rp_filter = 1
+EOF
+            sysctl --system
+            echo "Đã tối ưu hóa bảo mật mạng Kernel thành công!"
+        `
+    },
+    auto_updates: {
+        name: 'Auto Security Updates',
+        command: `
+            echo "=== BẬT TỰ ĐỘNG CẬP NHẬT BẢN VÁ BẢO MẬT ==="
+            if [ -f /etc/debian_version ]; then
+                apt-get update
+                DEBIAN_FRONTEND=noninteractive apt-get install -y unattended-upgrades apt-listchanges
+                echo "Configuring unattended-upgrades..."
+                echo 'APT::Periodic::Update-Package-Lists "1";' > /etc/apt/apt.conf.d/20auto-upgrades
+                echo 'APT::Periodic::Unattended-Upgrade "1";' >> /etc/apt/apt.conf.d/20auto-upgrades
+                systemctl restart unattended-upgrades
+                echo "Unattended upgrades đã được cài đặt và cấu hình tự động cập nhật hàng ngày."
+            else
+                yum install -y yum-cron
+                systemctl enable yum-cron
+                systemctl start yum-cron
+                sed -i 's/update_cmd = default/update_cmd = security/g' /etc/yum/yum-cron.conf
+                echo "Yum-cron đã được cài đặt và cấu hình cập nhật bản vá bảo mật."
+            fi
+        `
+    },
+    clamav_scan: {
+        name: 'ClamAV Malware Scan (/var/www)',
+        command: `
+            echo "=== CÀI ĐẶT & QUÉT MÃ ĐỘC VỚI CLAMAV ==="
+            if ! command -v clamscan &> /dev/null; then
+                echo "Đang cài đặt ClamAV Malware Scanner... Sẽ mất 1-2 phút..."
+                if [ -f /etc/debian_version ]; then
+                    apt-get update && apt-get install -y clamav clamav-daemon
+                else
+                    yum install -y epel-release && yum install -y clamav clamav-update
+                fi
+                echo "Đang cập nhật cơ sở dữ liệu virus..."
+                freshclam || true
+            fi
+            echo "Đang quét nhanh thư mục Web /var/www để tìm mã độc, backdoor..."
+            clamscan -r --infected --no-summary /var/www || echo "Không phát hiện mã độc nguy hiểm nào."
         `
     }
 };
