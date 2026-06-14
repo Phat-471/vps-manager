@@ -560,8 +560,8 @@ async function getServiceHealth(req, res) {
             `echo "${s.id}|$STATUS|$ENABLED"`
         ).join('; ');
 
-        // Also detect php-fpm dynamically
-        const phpScript = `php_fpm=$(systemctl list-units --type=service --state=running 2>/dev/null | grep 'php.*fpm' | awk '{print $1}' | head -3); for u in $php_fpm; do n="${u%.service}"; echo "$n|active|enabled"; done`;
+        // Also detect php-fpm dynamically - use string concat to avoid JS template literal conflict with bash ${u%.service}
+        const phpScript = 'php_fpm=$(systemctl list-units --type=service --state=running 2>/dev/null | grep \'php.*fpm\' | awk \'{print $1}\' | head -3); for u in $php_fpm; do n="${u%.service}"; echo "$n|active|enabled"; done';
 
         const [result, phpResult] = await Promise.all([
             ssh.executeCommand(script),
