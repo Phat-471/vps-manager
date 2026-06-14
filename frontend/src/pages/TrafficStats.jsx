@@ -317,34 +317,71 @@ export default function TrafficStats() {
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-white/5 pb-2 text-gray-400 font-mono">
-                      <th className="pb-2">Địa chỉ IP</th>
-                      <th className="pb-2 text-center" style={{ width: '80px' }}>Requests</th>
-                      <th className="pb-2 text-right" style={{ width: '90px' }}>Tường lửa</th>
+                      <th className="pb-2">Địa chỉ IP / Nhà mạng (ISP)</th>
+                      <th className="pb-2">Quốc gia</th>
+                      <th className="pb-2 text-center" style={{ width: '120px' }}>Loại</th>
+                      <th className="pb-2 text-center" style={{ width: '70px' }}>Requests</th>
+                      <th className="pb-2 text-right" style={{ width: '80px' }}>Tường lửa</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {stats.topIPs.length === 0 ? (
                       <tr>
-                        <td colSpan="3" className="py-4 text-center text-gray-500">Không có dữ liệu</td>
+                        <td colSpan="5" className="py-4 text-center text-gray-500">Không có dữ liệu</td>
                       </tr>
                     ) : (
-                      stats.topIPs.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-white/[0.01]">
-                          <td className="py-2.5 font-mono text-gray-300">{item.ip}</td>
-                          <td className="py-2.5 text-center font-semibold text-gray-200">{item.count.toLocaleString()}</td>
-                          <td className="py-2.5 text-right">
-                            <button
-                              disabled={blockingIp === item.ip}
-                              onClick={() => handleBlockIP(item.ip)}
-                              className="btn btn-glass btn-xs text-red-400 flex items-center gap-1 ml-auto"
-                              style={{ padding: '2px 6px', fontSize: '10px' }}
-                            >
-                              <ShieldAlert size={10} />
-                              {blockingIp === item.ip ? 'Chặn...' : 'Chặn IP'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                      stats.topIPs.map((item, idx) => {
+                        const getFlagEmoji = (countryCode) => {
+                          if (!countryCode) return '🏳️';
+                          const codePoints = countryCode
+                            .toUpperCase()
+                            .split('')
+                            .map(char => 127397 + char.charCodeAt(0));
+                          try {
+                            return String.fromCodePoint(...codePoints);
+                          } catch (e) {
+                            return '🏳️';
+                          }
+                        };
+
+                        return (
+                          <tr key={idx} className="hover:bg-white/[0.01]">
+                            <td className="py-2.5 font-mono">
+                              <span className="text-gray-200 block font-semibold">{item.ip}</span>
+                              <span className="text-gray-500 text-[10px] block truncate max-w-[200px]" title={item.org}>{item.org}</span>
+                            </td>
+                            <td className="py-2.5">
+                              <span className="flex items-center gap-1.5 text-gray-300" title={item.country}>
+                                <span className="text-base leading-none">{getFlagEmoji(item.countryCode)}</span>
+                                <span className="truncate max-w-[80px]">{item.country}</span>
+                              </span>
+                            </td>
+                            <td className="py-2.5 text-center">
+                              {item.isBot ? (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20 inline-flex items-center gap-1">
+                                  🤖 Bot/Datacenter
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 inline-flex items-center gap-1">
+                                  👤 Người dùng
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 text-center font-semibold text-gray-200 font-mono">{item.count.toLocaleString()}</td>
+                            <td className="py-2.5 text-right">
+                              <button
+                                disabled={blockingIp === item.ip}
+                                onClick={() => handleBlockIP(item.ip)}
+                                className="btn btn-glass btn-xs text-red-400 flex items-center gap-1 ml-auto"
+                                style={{ padding: '2px 6px', fontSize: '10px' }}
+                              >
+                                <ShieldAlert size={10} />
+                                {blockingIp === item.ip ? 'Chặn...' : 'Chặn IP'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>

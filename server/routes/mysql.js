@@ -26,4 +26,9 @@ router.post('/export', MySQLController.exportDatabase);
 router.post('/import', MySQLController.importDatabase);
 router.post('/repair-system', MySQLController.repairSystem);
 
+// Privilege Management & Password Change (Phase 5)
+router.post('/users/grants', MySQLController.getUserPrivileges);
+router.post('/users/grant', MySQLController.grantPrivileges);
+router.post('/users/change-password', MySQLController.changePassword);
+
 module.exports = router;

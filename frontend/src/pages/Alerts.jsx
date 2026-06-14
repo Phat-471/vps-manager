@@ -10,7 +10,9 @@ import {
   MessageSquare, 
   Sliders, 
   Check, 
-  AlertTriangle 
+  AlertTriangle,
+  Zap,
+  HeartPulse
 } from 'lucide-react';
 
 export default function Alerts() {
@@ -32,6 +34,7 @@ export default function Alerts() {
   // VPS Specific thresholds state
   const [monitorEnabled, setMonitorEnabled] = useState(false);
   const [downtimeAlert, setDowntimeAlert] = useState(false);
+  const [autoHealing, setAutoHealing] = useState(false);
   const [cpuLimit, setCpuLimit] = useState(90);
   const [ramLimit, setRamLimit] = useState(90);
   const [diskLimit, setDiskLimit] = useState(90);
@@ -64,6 +67,7 @@ export default function Alerts() {
           setCpuLimit(vpsThresh.cpuLimit || 90);
           setRamLimit(vpsThresh.ramLimit || 90);
           setDiskLimit(vpsThresh.diskLimit || 90);
+          setAutoHealing(vpsThresh.autoHealing || false);
         } else {
           // Defaults if not configured yet
           setMonitorEnabled(false);
@@ -71,6 +75,7 @@ export default function Alerts() {
           setCpuLimit(90);
           setRamLimit(90);
           setDiskLimit(90);
+          setAutoHealing(false);
         }
       }
     } catch (err) {
@@ -115,7 +120,8 @@ export default function Alerts() {
         cpuLimit,
         ramLimit,
         diskLimit,
-        downtimeAlert
+        downtimeAlert,
+        autoHealing
       });
       showToast('Đã cập nhật ngưỡng cảnh báo tài nguyên VPS thành công!', 'success');
       fetchConfig();
@@ -355,6 +361,53 @@ export default function Alerts() {
                       <p className="text-[10px] text-gray-400 pl-6 leading-normal">
                         Nhận thông báo khẩn cấp ngay lập tức nếu daemon không thể thực thi kết nối SSH tới VPS (giả lập máy chủ sập nguồn/tắt mạng).
                       </p>
+                    </div>
+
+                    {/* Auto-healing toggle */}
+                    <div className="p-4 rounded-lg border space-y-2" style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.07) 0%, rgba(5,150,105,0.04) 100%)', borderColor: 'rgba(16,185,129,0.15)' }}>
+                      <label className="flex items-center gap-2.5 cursor-pointer" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div
+                          onClick={() => setAutoHealing(v => !v)}
+                          style={{
+                            position: 'relative',
+                            width: '40px',
+                            height: '22px',
+                            borderRadius: '11px',
+                            background: autoHealing ? 'linear-gradient(135deg,#10b981,#059669)' : 'rgba(255,255,255,0.1)',
+                            cursor: 'pointer',
+                            transition: 'background 0.3s',
+                            flexShrink: 0,
+                            boxShadow: autoHealing ? '0 0 10px rgba(16,185,129,0.4)' : 'none'
+                          }}
+                        >
+                          <div style={{
+                            position: 'absolute',
+                            top: '3px',
+                            left: autoHealing ? '21px' : '3px',
+                            width: '16px',
+                            height: '16px',
+                            borderRadius: '50%',
+                            background: 'white',
+                            transition: 'left 0.3s',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                          }} />
+                        </div>
+                        <span className="text-xs font-semibold" style={{ color: autoHealing ? '#34d399' : '#9ca3af' }}>
+                          <Zap size={12} style={{ display: 'inline', marginRight: '4px', verticalAlign: 'middle' }} />
+                          Tự động Khôi phục Dịch vụ (Auto-Healing)
+                        </span>
+                      </label>
+                      <p className="text-[10px] pl-0 leading-relaxed" style={{ color: '#6b7280' }}>
+                        Daemon sẽ định kỳ kiểm tra trạng thái các dịch vụ <b style={{ color: '#9ca3af' }}>Nginx, MySQL, MariaDB, PHP-FPM, Docker</b> trên VPS. Nếu bất kỳ dịch vụ nào bị sập, hệ thống sẽ tự động thực thi lệnh <code style={{ background: 'rgba(255,255,255,0.07)', padding: '1px 4px', borderRadius: '3px', color: '#6ee7b7' }}>systemctl start</code> để khôi phục và thông báo kết quả qua Telegram/Discord.
+                      </p>
+                      {autoHealing && (
+                        <div className="flex items-start gap-2 mt-1 p-2 rounded" style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.12)' }}>
+                          <Zap size={11} style={{ color: '#34d399', marginTop: '1px', flexShrink: 0 }} />
+                          <span style={{ fontSize: '10px', color: '#6ee7b7', lineHeight: '1.5' }}>
+                            <b>Đang bật:</b> Cooldown 1 giờ được áp dụng — hệ thống chỉ gửi tối đa 1 thông báo khôi phục thành công/thất bại mỗi giờ cho mỗi dịch vụ để tránh spam.
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* CPU Threshold */}

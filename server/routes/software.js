@@ -27,5 +27,6 @@ router.post('/install-apache', SoftwareController.installApache);
 router.post('/install-fail2ban', SoftwareController.installFail2Ban);
 router.post('/install-golang', SoftwareController.installGolang);
 router.post('/installed', SoftwareController.getInstalledSoftware);
+router.post('/uninstall', SoftwareController.uninstallSoftware);
 
 module.exports = router;

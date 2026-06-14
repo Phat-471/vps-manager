@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useVPS } from '../context/VPSContext';
 import Topbar from '../components/Topbar';
-import { RotateCw, Power, Cpu, Trash2, Key, ShieldCheck, X, Check, Activity } from 'lucide-react';
+import { RotateCw, Power, Cpu, Trash2, Key, ShieldCheck, X, Check, Activity, HeartPulse, Play, Square, RefreshCw } from 'lucide-react';
 
 export default function Dashboard() {
   const { socket, apiCall, showToast, isConnected, currentVPS, isPanelProtected, setupPanel, setActivePage } = useVPS();
@@ -33,6 +33,10 @@ export default function Dashboard() {
   const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
   const [setupLoading, setSetupLoading] = useState(false);
 
+  // Service Health state (Phase 6)
+  const [serviceHealth, setServiceHealth] = useState([]);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [restartingService, setRestartingService] = useState(null);
 
   const fetchChecklist = async () => {
     setLoadingChecklist(true);
@@ -174,13 +178,40 @@ export default function Dashboard() {
     }
   };
 
+  const loadServiceHealth = async () => {
+    setHealthLoading(true);
+    try {
+      const res = await apiCall('/api/system/service-health', 'POST');
+      if (res.success) setServiceHealth(res.data || []);
+    } catch (err) {
+      console.error('Lỗi kiểm tra health:', err);
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
+  const handleQuickService = async (serviceId, action) => {
+    setRestartingService(`${serviceId}:${action}`);
+    try {
+      const res = await apiCall('/api/system/service-restart', 'POST', { serviceId, action });
+      showToast(res.message, 'success');
+      setServiceHealth(prev => prev.map(s =>
+        s.id === serviceId ? { ...s, active: res.status === 'active', status: res.status } : s
+      ));
+    } catch (err) {
+      showToast('Lỗi: ' + err.message, 'error');
+    } finally {
+      setRestartingService(null);
+    }
+  };
+
 
   useEffect(() => {
     if (!isConnected) return;
-
-    // Load static data first
     loadStaticData();
     fetchChecklist();
+    loadServiceHealth();
+
 
     // Listen to real-time socket updates
     if (socket && currentVPS) {
@@ -514,6 +545,77 @@ export default function Dashboard() {
           </div>
           <div className="stat-card-footer">Trạng thái: Hoạt động</div>
         </div>
+      </div>
+
+      {/* Service Health Panel (Phase 6) */}
+      <div className="card-glass" style={{ padding: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 className="font-semibold text-sm tracking-wider uppercase text-gray-400" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <HeartPulse size={16} className="text-rose-400" />
+            Giám sát Dịch vụ (Service Health)
+          </h3>
+          <button onClick={loadServiceHealth} disabled={healthLoading} className="btn btn-glass" style={{ padding: '4px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <RotateCw size={12} className={healthLoading ? 'animate-spin' : ''} /> Làm mới
+          </button>
+        </div>
+        {healthLoading && serviceHealth.length === 0 ? (
+          <div className="text-center py-6 text-gray-400 text-sm">Đang kiểm tra trạng thái dịch vụ...</div>
+        ) : serviceHealth.length === 0 ? (
+          <div className="text-center py-6 text-gray-500 text-sm">Không tìm thấy dịch vụ nào đang chạy.</div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
+            {serviceHealth.map(svc => {
+              const isRestarting = restartingService?.startsWith(svc.id + ':');
+              return (
+                <div key={svc.id} className="card-glass rounded-xl p-3" style={{
+                  border: svc.active ? '1px solid rgba(16,185,129,0.15)' : '1px solid rgba(239,68,68,0.15)',
+                  background: svc.active ? 'rgba(16,185,129,0.04)' : 'rgba(239,68,68,0.04)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span className="font-semibold text-sm" style={{ color: '#e2e8f0' }}>
+                      {svc.icon} {svc.name}
+                    </span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{
+                      background: svc.active ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                      color: svc.active ? '#34d399' : '#f87171'
+                    }}>
+                      {svc.active ? '● Active' : '○ Inactive'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '5px' }}>
+                    {!svc.active && (
+                      <button
+                        onClick={() => handleQuickService(svc.id, 'start')}
+                        disabled={isRestarting}
+                        style={{ flex: 1, fontSize: '10px', padding: '4px 6px', borderRadius: '5px', background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.25)', cursor: isRestarting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px' }}
+                      >
+                        <Play size={9} /> Start
+                      </button>
+                    )}
+                    {svc.active && (
+                      <button
+                        onClick={() => handleQuickService(svc.id, 'restart')}
+                        disabled={isRestarting}
+                        style={{ flex: 1, fontSize: '10px', padding: '4px 6px', borderRadius: '5px', background: 'rgba(99,102,241,0.12)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.2)', cursor: isRestarting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px' }}
+                      >
+                        <RefreshCw size={9} className={isRestarting ? 'animate-spin' : ''} /> Restart
+                      </button>
+                    )}
+                    {svc.active && (
+                      <button
+                        onClick={() => handleQuickService(svc.id, 'stop')}
+                        disabled={isRestarting}
+                        style={{ fontSize: '10px', padding: '4px 8px', borderRadius: '5px', background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)', cursor: isRestarting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}
+                      >
+                        <Square size={9} /> Stop
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* System info lists */}

@@ -732,6 +732,49 @@ async function installGolang(req, res) {
     }
 }
 
+async function uninstallSoftware(req, res) {
+    try {
+        const { vpsConfig, softwareId } = req.body;
+        if (!softwareId) {
+            return res.status(400).json({ success: false, error: 'Thiếu định danh phần mềm cần gỡ' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const uninstallCmds = {
+            nginx: 'apt-get purge -y nginx nginx-common nginx-core && apt-get autoremove -y',
+            mysql: 'apt-get purge -y mysql-server mysql-client mysql-common && apt-get autoremove -y',
+            php: 'apt-get purge -y php-fpm php-cli php-common php-mysql php-curl php-gd php-mbstring php-xml php-zip php-bcmath php-soap php-intl php-readline && apt-get autoremove -y',
+            nodejs: 'apt-get purge -y nodejs && apt-get autoremove -y && rm -rf $HOME/.nvm /root/.nvm',
+            docker: 'apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && apt-get autoremove -y',
+            java: 'apt-get purge -y openjdk-17-jdk openjdk-17-jre && apt-get autoremove -y',
+            mongodb: 'apt-get purge -y mongodb-org mongodb-org-server mongodb-org-shell mongodb-org-mongos mongodb-org-tools && apt-get autoremove -y',
+            redis: 'apt-get purge -y redis-server redis-tools && apt-get autoremove -y',
+            golang: 'apt-get purge -y golang-go && apt-get autoremove -y',
+            fail2ban: 'apt-get purge -y fail2ban && apt-get autoremove -y',
+            certbot: 'apt-get purge -y certbot python3-certbot-nginx && apt-get autoremove -y',
+            composer: 'rm -f /usr/local/bin/composer',
+            apache: 'apt-get purge -y apache2 && apt-get autoremove -y',
+            lemp: 'apt-get purge -y nginx nginx-common nginx-core mysql-server mysql-client mysql-common php-fpm php-cli php-common php-mysql && apt-get autoremove -y'
+        };
+
+        const cmd = uninstallCmds[softwareId];
+        if (!cmd) {
+            return res.status(400).json({ success: false, error: `Không hỗ trợ gỡ cài đặt phần mềm này: ${softwareId}` });
+        }
+
+        const result = await ssh.executeCommand(cmd);
+
+        res.json({
+            success: true,
+            message: `Đã gỡ cài đặt ${softwareId} thành công`,
+            output: result.stdout || result.stderr
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     detectOS,
     installPackage,
@@ -754,5 +797,6 @@ module.exports = {
     installJava,
     installApache,
     installFail2Ban,
-    installGolang
+    installGolang,
+    uninstallSoftware
 };

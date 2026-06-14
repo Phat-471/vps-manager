@@ -534,6 +534,95 @@ async function getSetupChecklist(req, res) {
     }
 }
 
+/**
+ * Kiểm tra sức khỏe tất cả dịch vụ quan trọng
+ */
+async function getServiceHealth(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const SERVICES = [
+            { id: 'nginx',    name: 'Nginx',       icon: '🌐' },
+            { id: 'mysql',    name: 'MySQL',        icon: '🗄️' },
+            { id: 'mariadb',  name: 'MariaDB',      icon: '🗄️' },
+            { id: 'docker',   name: 'Docker',       icon: '🐳' },
+            { id: 'redis',    name: 'Redis',        icon: '⚡' },
+            { id: 'mongodb',  name: 'MongoDB',      icon: '🍃' },
+            { id: 'fail2ban', name: 'Fail2Ban',     icon: '🛡️' },
+            { id: 'ufw',      name: 'UFW Firewall', icon: '🔥' },
+        ];
+
+        // Run all checks in parallel via one script
+        const script = SERVICES.map(s =>
+            `STATUS=$(systemctl is-active ${s.id} 2>/dev/null || echo "not-found"); ` +
+            `ENABLED=$(systemctl is-enabled ${s.id} 2>/dev/null || echo "disabled"); ` +
+            `echo "${s.id}|$STATUS|$ENABLED"`
+        ).join('; ');
+
+        // Also detect php-fpm dynamically
+        const phpScript = `php_fpm=$(systemctl list-units --type=service --state=running 2>/dev/null | grep 'php.*fpm' | awk '{print $1}' | head -3); for u in $php_fpm; do n="${u%.service}"; echo "$n|active|enabled"; done`;
+
+        const [result, phpResult] = await Promise.all([
+            ssh.executeCommand(script),
+            ssh.executeCommand(phpScript)
+        ]);
+
+        const services = [];
+        const allLines = (result.stdout + '\n' + phpResult.stdout).trim().split('\n').filter(Boolean);
+
+        for (const line of allLines) {
+            const [id, status, enabled] = line.split('|');
+            if (!id) continue;
+            // Skip if not-found AND not a php-fpm service
+            if (status === 'not-found' && !id.includes('php')) continue;
+            if (status === 'not-found') continue;
+
+            // Find meta
+            const meta = SERVICES.find(s => s.id === id) || {
+                id, name: id.replace('-', ' ').toUpperCase(), icon: '⚙️'
+            };
+            services.push({
+                id,
+                name: meta.name,
+                icon: meta.icon,
+                active: status === 'active',
+                status,
+                enabled: enabled === 'enabled' || enabled === 'static'
+            });
+        }
+
+        res.json({ success: true, data: services });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * Khởi động lại một dịch vụ nhanh
+ */
+async function quickRestartService(req, res) {
+    try {
+        const { vpsConfig, serviceId, action } = req.body;
+        // Whitelist service names
+        const safeId = (serviceId || '').replace(/[^a-zA-Z0-9._@-]/g, '');
+        if (!safeId) {
+            return res.status(400).json({ success: false, error: 'Service ID không hợp lệ' });
+        }
+        const safeAction = ['start', 'stop', 'restart', 'reload'].includes(action) ? action : 'restart';
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const result = await ssh.executeCommand(`systemctl ${safeAction} ${safeId} 2>&1; systemctl is-active ${safeId}`);
+        const newStatus = result.stdout.trim().split('\n').pop();
+        res.json({
+            success: true,
+            message: `Đã ${safeAction} dịch vụ ${safeId}`,
+            status: newStatus
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getSystemInfo,
     getCPUInfo,
@@ -549,5 +638,7 @@ module.exports = {
     cleanSystemCache,
     cleanSystemLogs,
     changeRootPassword,
-    getSetupChecklist
+    getSetupChecklist,
+    getServiceHealth,
+    quickRestartService
 };

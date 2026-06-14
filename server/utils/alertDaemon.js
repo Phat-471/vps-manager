@@ -72,11 +72,38 @@ async function checkVPS(vpsId, threshold, channels) {
             const util = require('util');
             const execPromise = util.promisify(exec);
             
-            const { stdout, stderr } = await execPromise(`
+            let cmdStr = `
                 top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'
                 free -m | grep Mem | awk '{print ($3/$2)*100}'
                 df -h / | tail -1 | awk '{print $5}' | tr -d '%'
-            `);
+            `;
+            if (threshold.autoHealing) {
+                cmdStr += `
+                # Auto-healing checks
+                services=("nginx" "mysql" "docker" "mariadb")
+                php_fpm_services=$(systemctl list-units --type=service --state=running 2>/dev/null | grep php | awk '{print $1}' | cut -d'.' -f1 || echo "")
+                for svc in $php_fpm_services; do
+                    services+=("$svc")
+                done
+                for svc in "\${services[@]}"; do
+                    if [ -n "$svc" ] && (systemctl is-enabled "$svc" >/dev/null 2>&1 || service "$svc" status >/dev/null 2>&1); then
+                        status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
+                        if [ "$status" != "active" ]; then
+                            echo "SERVICE_DOWN:$svc"
+                            systemctl start "$svc" >/dev/null 2>&1 || service "$svc" start >/dev/null 2>&1
+                            new_status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
+                            if [ "$new_status" = "active" ]; then
+                                echo "SERVICE_RECOVERED:$svc"
+                            else
+                                echo "SERVICE_RECOVERY_FAILED:$svc"
+                            fi
+                        fi
+                    fi
+                done
+                `;
+            }
+            
+            const { stdout, stderr } = await execPromise(cmdStr);
             statsResult = { code: 0, stdout, stderr };
             
             // Local execution successful, clear downtime cooldown
@@ -98,11 +125,37 @@ async function checkVPS(vpsId, threshold, channels) {
                 clearCooldown(vpsId, 'downtime');
 
                 // 2. Fetch resource metrics
-                statsResult = await ssh.executeCommand(`
+                let cmdStr = `
                     top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'
                     free -m | grep Mem | awk '{print ($3/$2)*100}'
                     df -h / | tail -1 | awk '{print $5}' | tr -d '%'
-                `);
+                `;
+                if (threshold.autoHealing) {
+                    cmdStr += `
+                    # Auto-healing checks
+                    services=("nginx" "mysql" "docker" "mariadb")
+                    php_fpm_services=$(systemctl list-units --type=service --state=running 2>/dev/null | grep php | awk '{print $1}' | cut -d'.' -f1 || echo "")
+                    for svc in $php_fpm_services; do
+                        services+=("$svc")
+                    done
+                    for svc in "\${services[@]}"; do
+                        if [ -n "$svc" ] && (systemctl is-enabled "$svc" >/dev/null 2>&1 || service "$svc" status >/dev/null 2>&1); then
+                            status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
+                            if [ "$status" != "active" ]; then
+                                echo "SERVICE_DOWN:$svc"
+                                systemctl start "$svc" >/dev/null 2>&1 || service "$svc" start >/dev/null 2>&1
+                                new_status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
+                                if [ "$new_status" = "active" ]; then
+                                    echo "SERVICE_RECOVERED:$svc"
+                                else
+                                    echo "SERVICE_RECOVERY_FAILED:$svc"
+                               fi
+                            fi
+                        fi
+                    done
+                    `;
+                }
+                statsResult = await ssh.executeCommand(cmdStr);
             } finally {
                 ssh.disconnect();
             }
@@ -154,10 +207,30 @@ async function checkVPS(vpsId, threshold, channels) {
             clearCooldown(vpsId, 'disk');
         }
 
+        // 4. Evaluate Auto-healing results
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine.startsWith('SERVICE_RECOVERED:')) {
+                const svc = trimmedLine.split(':')[1];
+                if (shouldAlert(vpsId, `recovery_success:${svc}`)) {
+                    const rawMsg = `🔄 **[AUTO-HEALING] KHÔI PHỤC DỊCH VỤ THÀNH CÔNG**\n\n**Máy chủ:** ${threshold.host}\n**Dịch vụ:** \`${svc}\` bị sập đột ngột.\n**Hành động:** Hệ thống đã tự động gửi lệnh khởi động lại (\`systemctl start ${svc}\`) và khôi phục hoạt động thành công!`;
+                    const htmlMsg = `🔄 <b>[AUTO-HEALING] KHÔI PHỤC DỊCH VỤ THÀNH CÔNG</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Dịch vụ:</b> <code>${svc}</code> bị sập đột ngột.\n<b>Hành động:</b> Hệ thống đã tự động gửi lệnh khởi động lại (<code>systemctl start ${svc}</code>) và khôi phục hoạt động thành công!`;
+                    await dispatchAlert(channels, rawMsg, htmlMsg);
+                }
+            } else if (trimmedLine.startsWith('SERVICE_RECOVERY_FAILED:')) {
+                const svc = trimmedLine.split(':')[1];
+                if (shouldAlert(vpsId, `recovery_fail:${svc}`)) {
+                    const rawMsg = `🚨 **[AUTO-HEALING] KHÔI PHỤC DỊCH VỤ THẤT BẠI**\n\n**Máy chủ:** ${threshold.host}\n**Dịch vụ:** \`${svc}\` bị sập đột ngột.\n**Hành động:** Hệ thống đã tự động chạy lệnh khởi động lại nhưng dịch vụ **vẫn không hoạt động**.\n\n⚠️ Vui lòng truy cập Terminal để kiểm tra cấu hình lỗi.`;
+                    const htmlMsg = `🚨 <b>[AUTO-HEALING] KHÔI PHỤC DỊCH VỤ THẤT BẠI</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Dịch vụ:</b> <code>${svc}</code> bị sập đột ngột.\n<b>Hành động:</b> Hệ thống đã tự động chạy lệnh khởi động lại nhưng dịch vụ <b>vẫn không hoạt động</b>.\n\n⚠️ Vui lòng truy cập Terminal để kiểm tra cấu hình lỗi.`;
+                    await dispatchAlert(channels, rawMsg, htmlMsg);
+                }
+            }
+        }
+
     } catch (err) {
         console.error(`AlertDaemon error connecting to VPS ${threshold.host}:`, err.message);
 
-        // 4. Handle downtime alerts
+        // 5. Handle downtime alerts
         if (threshold.downtimeAlert) {
             if (shouldAlert(vpsId, 'downtime')) {
                 const rawMsg = `🚨 **[ALERT] VPS MẤT KẾT NỐI (DOWNTIME)**\n\n**Máy chủ:** ${threshold.host}\n**Trạng thái:** Không thể thiết lập kết nối SSH tới máy chủ.\n**Chi tiết:** ${err.message}\n\n⚠️ Máy chủ có thể đã sập nguồn, khởi động lại hoặc gặp sự cố mạng diện rộng.`;

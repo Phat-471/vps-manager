@@ -183,6 +183,16 @@ async function listNodeVersions(req, res) {
             }
         });
 
+        if (remoteLts.length === 0) {
+            remoteLts.push(
+                { version: 'v22.11.0', ltsLabel: 'Jod' },
+                { version: 'v20.18.0', ltsLabel: 'Iron' },
+                { version: 'v18.20.4', ltsLabel: 'Hydrogen' },
+                { version: 'v16.20.2', ltsLabel: 'Gallium' },
+                { version: 'v14.21.3', ltsLabel: 'Fermium' }
+            );
+        }
+
         // Group into unique list of versions
         const resultData = {
             current,
@@ -279,10 +289,40 @@ async function setDefaultNodeVersion(req, res) {
     }
 }
 
+async function uninstallNodeVersion(req, res) {
+    try {
+        const { vpsConfig, version } = req.body;
+        const cleanVer = cleanNodeVersion(version);
+
+        if (!cleanVer) {
+            return res.status(400).json({ success: false, error: 'Phiên bản Node.js không hợp lệ hoặc không an toàn' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const script = `
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            nvm uninstall ${cleanVer}
+        `;
+
+        const result = await ssh.executeCommand(script);
+        if (result.code !== 0) {
+            return res.status(500).json({ success: false, error: `Gỡ cài đặt Node.js ${cleanVer} thất bại`, details: result.stderr || result.stdout });
+        }
+
+        res.json({ success: true, message: `Đã gỡ cài đặt Node.js ${cleanVer} thành công!` });
+
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getNodeStatus,
     installNVM,
     listNodeVersions,
     installNodeVersion,
-    setDefaultNodeVersion
+    setDefaultNodeVersion,
+    uninstallNodeVersion
 };

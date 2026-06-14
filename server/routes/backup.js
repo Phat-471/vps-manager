@@ -9,5 +9,9 @@ router.post('/delete', BackupController.deleteBackup);
 router.post('/download', BackupController.downloadBackup);
 router.post('/rclone/install', BackupController.installRclone);
 router.post('/rclone/status', BackupController.checkRcloneStatus);
+router.post('/rclone/remotes', BackupController.listRcloneRemotes);
+router.post('/rclone/remotes/save', BackupController.saveRcloneRemote);
+router.post('/rclone/remotes/delete', BackupController.deleteRcloneRemote);
+router.post('/rclone/remotes/test', BackupController.testRcloneRemote);
 
 module.exports = router;

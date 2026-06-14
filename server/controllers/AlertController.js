@@ -195,7 +195,8 @@ async function getConfig(req, res) {
                 cpuLimit: threshold.cpuLimit,
                 ramLimit: threshold.ramLimit,
                 diskLimit: threshold.diskLimit,
-                downtimeAlert: threshold.downtimeAlert || false
+                downtimeAlert: threshold.downtimeAlert || false,
+                autoHealing: threshold.autoHealing || false
             };
         }
         
@@ -248,7 +249,7 @@ async function saveChannels(req, res) {
 
 async function saveThreshold(req, res) {
     try {
-        const { vpsConfig, enabled, cpuLimit, ramLimit, diskLimit, downtimeAlert } = req.body;
+        const { vpsConfig, enabled, cpuLimit, ramLimit, diskLimit, downtimeAlert, autoHealing } = req.body;
         
         if (!vpsConfig || !vpsConfig.id) {
             return res.status(400).json({ success: false, error: 'Thiếu cấu hình VPS' });
@@ -266,7 +267,8 @@ async function saveThreshold(req, res) {
             cpuLimit: parseInt(cpuLimit) || 90,
             ramLimit: parseInt(ramLimit) || 90,
             diskLimit: parseInt(diskLimit) || 90,
-            downtimeAlert: !!downtimeAlert
+            downtimeAlert: !!downtimeAlert,
+            autoHealing: !!autoHealing
         };
         
         writeConfig(config);

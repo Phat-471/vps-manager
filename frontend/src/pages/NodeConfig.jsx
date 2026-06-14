@@ -28,7 +28,13 @@ export default function NodeConfig() {
     current: '',
     default: '',
     installed: [],
-    remoteLts: []
+    remoteLts: [
+      { version: 'v22.11.0', ltsLabel: 'Jod' },
+      { version: 'v20.18.0', ltsLabel: 'Iron' },
+      { version: 'v18.20.4', ltsLabel: 'Hydrogen' },
+      { version: 'v16.20.2', ltsLabel: 'Gallium' },
+      { version: 'v14.21.3', ltsLabel: 'Fermium' }
+    ]
   });
 
   const [installingNvm, setInstallingNvm] = useState(false);
@@ -125,6 +131,29 @@ export default function NodeConfig() {
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setActionVersion(null);
+      setActionType('');
+    }
+  };
+
+  const handleUninstallNode = async (version) => {
+    if (!version) return;
+    if (!window.confirm(`Bạn có chắc chắn muốn gỡ cài đặt Node.js phiên bản ${version}?`)) return;
+
+    setActionVersion(version);
+    setActionType('uninstall');
+    showToast(`Đang chạy tiến trình gỡ cài đặt Node.js ${version}...`, 'info');
+    try {
+      const res = await apiCall('/api/node/versions/uninstall', 'POST', { version });
+      if (res.success) {
+        showToast(res.message, 'success');
+        await loadVersions();
+        await checkNvmStatus();
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi gỡ cài đặt Node.js: ' + err.message, 'error');
     } finally {
       setActionVersion(null);
       setActionType('');
@@ -298,14 +327,24 @@ export default function NodeConfig() {
                             </div>
                           </div>
 
-                          <button
-                            onClick={() => handleSetDefaultNode(v.version)}
-                            disabled={isDefault || actionVersion !== null}
-                            className={`btn text-xs ${isDefault ? 'btn-secondary text-gray-500 cursor-not-allowed' : 'btn-primary'}`}
-                            style={{ padding: '6px 12px' }}
-                          >
-                            {actionVersion === v.version && actionType === 'default' ? 'Đang đặt...' : 'Đặt làm mặc định'}
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              onClick={() => handleSetDefaultNode(v.version)}
+                              disabled={isDefault || actionVersion !== null}
+                              className={`btn text-xs ${isDefault ? 'btn-secondary text-gray-500 cursor-not-allowed' : 'btn-primary'}`}
+                              style={{ padding: '6px 12px' }}
+                            >
+                              {actionVersion === v.version && actionType === 'default' ? 'Đang đặt...' : 'Mặc định'}
+                            </button>
+                            <button
+                              onClick={() => handleUninstallNode(v.version)}
+                              disabled={isDefault || actionVersion !== null}
+                              className={`btn text-xs ${isDefault ? 'btn-secondary text-gray-500' : 'btn-danger'}`}
+                              style={{ padding: '6px 12px' }}
+                            >
+                              {actionVersion === v.version && actionType === 'uninstall' ? 'Đang gỡ...' : 'Gỡ'}
+                            </button>
+                          </div>
                         </div>
                       );
                     })

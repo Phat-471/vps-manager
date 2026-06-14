@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useVPS } from '../context/VPSContext';
-import { RotateCw, Plus, Globe, Settings, ShieldCheck, Trash, X, Database, ShieldAlert, FileText, HelpCircle } from 'lucide-react';
+import { RotateCw, Plus, Globe, Settings, ShieldCheck, Trash, X, Database, ShieldAlert, FileText, HelpCircle, ScanSearch, Wrench, CheckCircle2, XCircle, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function WebServer() {
   const { apiCall, showToast, isConnected, currentVPS } = useVPS();
@@ -28,6 +28,26 @@ export default function WebServer() {
   const [loadingCerts, setLoadingCerts] = useState(false);
   const [renewingAll, setRenewingAll] = useState(false);
   const [settingCron, setSettingCron] = useState(false);
+
+  // Advanced SSL states
+  const [sslMode, setSslMode] = useState('standard'); // 'standard' | 'wildcard' | 'custom'
+  const [wildcardDomain, setWildcardDomain] = useState('');
+  const [wildcardEmail, setWildcardEmail] = useState('');
+  const [cfEmail, setCfEmail] = useState('');
+  const [cfKey, setCfKey] = useState('');
+  const [cfToken, setCfToken] = useState('');
+  const [cfAuthMode, setCfAuthMode] = useState('token'); // 'token' | 'key'
+  const [customDomain, setCustomDomain] = useState('');
+  const [customCertText, setCustomCertText] = useState('');
+  const [customKeyText, setCustomKeyText] = useState('');
+  const [submittingSsl, setSubmittingSsl] = useState(false);
+  
+  // SSL Auto-Renew & Dry-Run state
+  const [cronStatus, setCronStatus] = useState({ active: false, checked: false, schedule: '', command: '' });
+  const [checkingCron, setCheckingCron] = useState(false);
+  const [testingRenew, setTestingRenew] = useState(false);
+  const [renewTestLogs, setRenewTestLogs] = useState('');
+  const [showTestModal, setShowTestModal] = useState(false);
   
   // DNS Diagnostic state
   const [dnsDomain, setDnsDomain] = useState('');
@@ -38,6 +58,12 @@ export default function WebServer() {
   const [hostsContent, setHostsContent] = useState('');
   const [loadingHosts, setLoadingHosts] = useState(false);
   const [savingHosts, setSavingHosts] = useState(false);
+
+  // Nginx Config Scanner state (Phase 4)
+  const [scanResult, setScanResult] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [fixingIssue, setFixingIssue] = useState(null); // key: `${file}:${fixType}`
+  const [expandedFile, setExpandedFile] = useState(null);
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -106,8 +132,16 @@ export default function WebServer() {
   }, [activeTab, isConnected]);
 
   useEffect(() => {
+    if (isConnected && activeTab === 'scanner') {
+      // Auto-scan when opening the scanner tab
+      if (!scanResult) handleScanNginx();
+    }
+  }, [activeTab, isConnected]);
+
+  useEffect(() => {
     if (isConnected && activeTab === 'ssl') {
       loadSSLCerts();
+      loadCronStatus();
     }
   }, [activeTab, isConnected]);
 
@@ -122,6 +156,25 @@ export default function WebServer() {
       showToast('Không thể tải danh sách chứng chỉ SSL: ' + err.message, 'error');
     } finally {
       setLoadingCerts(false);
+    }
+  };
+
+  const loadCronStatus = async () => {
+    setCheckingCron(true);
+    try {
+      const result = await apiCall('/api/webserver/ssl/check-cron', 'POST');
+      if (result.success) {
+        setCronStatus({
+          active: result.active,
+          checked: true,
+          schedule: result.schedule,
+          command: result.command
+        });
+      }
+    } catch (err) {
+      console.error('Lỗi kiểm tra cron:', err);
+    } finally {
+      setCheckingCron(false);
     }
   };
 
@@ -149,11 +202,37 @@ export default function WebServer() {
       const result = await apiCall('/api/webserver/ssl/setup-cron', 'POST');
       if (result.success) {
         showToast(result.message, 'success');
+        await loadCronStatus();
       }
     } catch (err) {
       showToast('Lỗi thiết lập Cron Job: ' + err.message, 'error');
     } finally {
       setSettingCron(false);
+    }
+  };
+
+  const handleTestSSLAutoRenew = async () => {
+    setTestingRenew(true);
+    setRenewTestLogs('Đang chạy certbot dry-run, vui lòng đợi...\n');
+    setShowTestModal(true);
+    try {
+      const result = await apiCall('/api/webserver/ssl/test-dryrun', 'POST');
+      if (result.success) {
+        let logMsg = `[MÃ THOÁT]: ${result.code}\n\n`;
+        if (result.stdout) logMsg += `--- STDOUT ---\n${result.stdout}\n`;
+        if (result.stderr) logMsg += `--- STDERR ---\n${result.stderr}\n`;
+        setRenewTestLogs(logMsg);
+        if (result.code === 0) {
+          showToast('Chạy thử gia hạn SSL Let\'s Encrypt thành công!', 'success');
+        } else {
+          showToast('Chạy thử gia hạn SSL báo lỗi!', 'warning');
+        }
+      }
+    } catch (err) {
+      setRenewTestLogs(`LỖI HỆ THỐNG:\n${err.message}`);
+      showToast('Không thể chạy thử gia hạn SSL: ' + err.message, 'error');
+    } finally {
+      setTestingRenew(false);
     }
   };
 
@@ -306,6 +385,115 @@ export default function WebServer() {
     }
   };
 
+  const handleInstallWildcardSSL = async (e) => {
+    e.preventDefault();
+    if (!wildcardDomain.trim()) {
+      showToast('Vui lòng nhập tên miền', 'warning');
+      return;
+    }
+    setSubmittingSsl(true);
+    showToast(`Đang cấu hình cài đặt SSL Wildcard cho *.${wildcardDomain}...`, 'info');
+    try {
+      const payload = {
+        domain: wildcardDomain.trim(),
+        email: wildcardEmail.trim(),
+      };
+      if (cfAuthMode === 'token') {
+        payload.cfToken = cfToken.trim();
+      } else {
+        payload.cfEmail = cfEmail.trim();
+        payload.cfKey = cfKey.trim();
+      }
+
+      const res = await apiCall('/api/webserver/ssl/wildcard', 'POST', payload);
+      if (res.success) {
+        showToast(res.message, 'success');
+        loadSSLCerts();
+        // Reset form
+        setWildcardDomain('');
+        setWildcardEmail('');
+        setCfEmail('');
+        setCfKey('');
+        setCfToken('');
+      }
+    } catch (err) {
+      showToast('Lỗi cài SSL Wildcard: ' + err.message, 'error');
+    } finally {
+      setSubmittingSsl(false);
+    }
+  };
+
+  const handleInstallCustomSSL = async (e) => {
+    e.preventDefault();
+    if (!customDomain.trim()) {
+      showToast('Vui lòng chọn hoặc nhập tên miền', 'warning');
+      return;
+    }
+    if (!customCertText.trim() || !customKeyText.trim()) {
+      showToast('Vui lòng nhập đầy đủ Certificate và Private Key', 'warning');
+      return;
+    }
+    setSubmittingSsl(true);
+    showToast(`Đang cài đặt Custom SSL cho ${customDomain}...`, 'info');
+    try {
+      const res = await apiCall('/api/webserver/ssl/custom', 'POST', {
+        domain: customDomain.trim(),
+        certText: customCertText,
+        keyText: customKeyText
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        loadSSLCerts();
+        // Reset form
+        setCustomDomain('');
+        setCustomCertText('');
+        setCustomKeyText('');
+      }
+    } catch (err) {
+      showToast('Lỗi cài Custom SSL: ' + err.message, 'error');
+    } finally {
+      setSubmittingSsl(false);
+    }
+  };
+
+  const handleScanNginx = async () => {
+    setScanning(true);
+    setScanResult(null);
+    try {
+      const res = await apiCall('/api/webserver/nginx/scan', 'POST');
+      if (res.success) {
+        setScanResult(res.data);
+        if (res.data.passed) {
+          showToast('Nginx cấu hình hợp lệ — không phát hiện lỗi!', 'success');
+        } else {
+          showToast(`Phát hiện ${res.data.errors.length} vấn đề cấu hình Nginx!`, 'warning');
+        }
+      }
+    } catch (err) {
+      showToast('Lỗi khi quét cấu hình Nginx: ' + err.message, 'error');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleFixNginx = async (fixType, filePath, lineNumber) => {
+    const key = `${filePath}:${fixType}`;
+    setFixingIssue(key);
+    try {
+      const res = await apiCall('/api/webserver/nginx/fix', 'POST', { fixType, filePath, lineNumber });
+      if (res.success && res.data.applied) {
+        showToast('Đã áp dụng bản vá thành công! Nginx đã được reload.', 'success');
+        await handleScanNginx(); // Re-scan after fix
+      } else {
+        showToast('Áp dụng bản vá thất bại. Kiểm tra log để biết thêm.', 'error');
+      }
+    } catch (err) {
+      showToast('Lỗi khi áp dụng bản vá: ' + err.message, 'error');
+    } finally {
+      setFixingIssue(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -360,6 +548,21 @@ export default function WebServer() {
         >
           <FileText size={16} />
           Cấu hình file Hosts (/etc/hosts)
+        </button>
+        <button 
+          className={`db-tab-item ${activeTab === 'scanner' ? 'active' : ''}`}
+          onClick={() => setActiveTab('scanner')}
+          style={{ position: 'relative' }}
+        >
+          <ScanSearch size={16} />
+          Nginx Config Scanner
+          {scanResult && !scanResult.passed && (
+            <span style={{
+              position: 'absolute', top: '4px', right: '4px',
+              background: '#ef4444', borderRadius: '50%',
+              width: '8px', height: '8px'
+            }} />
+          )}
         </button>
       </div>
 
@@ -444,14 +647,21 @@ export default function WebServer() {
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button 
-                className="btn btn-glass" 
+                className="btn btn-glass text-xs" 
+                onClick={handleTestSSLAutoRenew} 
+                disabled={testingRenew || loadingCerts}
+              >
+                {testingRenew ? 'Đang chạy thử...' : 'Chạy thử gia hạn (Dry-run)'}
+              </button>
+              <button 
+                className="btn btn-glass text-xs" 
                 onClick={handleSetupCronSSL} 
                 disabled={settingCron || loadingCerts}
               >
-                {settingCron ? 'Đang cài đặt...' : 'Thiết lập tự động gia hạn (Cron)'}
+                {settingCron ? 'Đang cài đặt...' : 'Cấu hình Cron gia hạn'}
               </button>
               <button 
-                className="btn btn-primary" 
+                className="btn btn-primary text-xs" 
                 onClick={handleRenewAllSSL} 
                 disabled={renewingAll || loadingCerts}
               >
@@ -459,6 +669,38 @@ export default function WebServer() {
               </button>
             </div>
           </div>
+
+          {/* Cron Auto-Renew Status Banner */}
+          {cronStatus.checked && (
+            <div className={`p-4 rounded-xl border flex items-center justify-between text-xs leading-relaxed ${
+              cronStatus.active 
+                ? 'bg-green-500/5 border-green-500/20 text-green-300' 
+                : 'bg-yellow-500/5 border-yellow-500/20 text-yellow-300'
+            }`}>
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck size={18} className={cronStatus.active ? 'text-green-400' : 'text-yellow-400'} />
+                <div>
+                  <strong>{cronStatus.active ? 'Đã kích hoạt gia hạn tự động qua Cron' : 'Chưa kích hoạt gia hạn tự động qua Cron'}</strong>
+                  <p className="text-gray-400 text-[10px] mt-0.5">
+                    {cronStatus.active 
+                      ? `Lịch chạy: ${cronStatus.schedule} (Hàng ngày lúc 00:00) | Câu lệnh: ${cronStatus.command}`
+                      : 'Nên cấu hình để hệ thống tự động kiểm tra và gia hạn các chứng chỉ SSL sắp hết hạn.'
+                    }
+                  </p>
+                </div>
+              </div>
+              {!cronStatus.active && (
+                <button 
+                  className="btn btn-glass btn-xs text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/10"
+                  onClick={handleSetupCronSSL}
+                  disabled={settingCron}
+                  style={{ padding: '4px 8px', fontSize: '10px' }}
+                >
+                  {settingCron ? 'Đang thiết lập...' : 'Kích hoạt ngay'}
+                </button>
+              )}
+            </div>
+          )}
 
           {loadingCerts ? (
             <div className="text-center py-12 text-gray-400 text-xs">
@@ -520,6 +762,183 @@ export default function WebServer() {
               </table>
             </div>
           )}
+
+          {/* Advanced SSL Tools */}
+          <div className="border-t border-white/5 pt-6 space-y-4">
+            <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Cài đặt chứng chỉ SSL nâng cao</h4>
+            
+            <div className="flex gap-2">
+              <button 
+                type="button" 
+                className={`btn btn-sm ${sslMode === 'wildcard' ? 'btn-primary' : 'btn-glass'}`}
+                onClick={() => setSslMode(sslMode === 'wildcard' ? 'standard' : 'wildcard')}
+              >
+                Cài đặt SSL Wildcard (Cloudflare)
+              </button>
+              <button 
+                type="button" 
+                className={`btn btn-sm ${sslMode === 'custom' ? 'btn-primary' : 'btn-glass'}`}
+                onClick={() => setSslMode(sslMode === 'custom' ? 'standard' : 'custom')}
+              >
+                Cấu hình SSL Custom (Tự tải lên)
+              </button>
+            </div>
+
+            {sslMode === 'wildcard' && (
+              <form onSubmit={handleInstallWildcardSSL} className="card-glass p-5 rounded-lg space-y-4 text-sm max-w-xl border border-white/10">
+                <div className="flex items-center justify-between">
+                  <h5 className="font-bold text-indigo-400">Đăng ký SSL Wildcard Let's Encrypt (*.domain.com)</h5>
+                  <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-mono">DNS-01 Challenge</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-gray-400 font-medium">Tên miền (Domain gốc):</label>
+                    <input 
+                      type="text" 
+                      required 
+                      placeholder="vd: mywebsite.com" 
+                      value={wildcardDomain}
+                      onChange={e => setWildcardDomain(e.target.value)}
+                      className="input-glass w-full text-xs" 
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-gray-400 font-medium">Email quản trị (Let's Encrypt):</label>
+                    <input 
+                      type="email" 
+                      placeholder="vd: admin@mywebsite.com" 
+                      value={wildcardEmail}
+                      onChange={e => setWildcardEmail(e.target.value)}
+                      className="input-glass w-full text-xs" 
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2 border-t border-white/5 pt-3">
+                  <label className="text-gray-400 font-medium block">Xác thực DNS qua Cloudflare:</label>
+                  
+                  <div className="flex gap-4 mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer text-xs">
+                      <input 
+                        type="radio" 
+                        name="cfAuthMode" 
+                        checked={cfAuthMode === 'token'}
+                        onChange={() => setCfAuthMode('token')} 
+                      />
+                      Sử dụng Cloudflare API Token (Khuyên dùng)
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-xs">
+                      <input 
+                        type="radio" 
+                        name="cfAuthMode" 
+                        checked={cfAuthMode === 'key'}
+                        onChange={() => setCfAuthMode('key')} 
+                      />
+                      Sử dụng Global API Key
+                    </label>
+                  </div>
+
+                  {cfAuthMode === 'token' ? (
+                    <div className="space-y-1">
+                      <label className="text-gray-400 text-xs">Cloudflare API Token:</label>
+                      <input 
+                        type="password" 
+                        required 
+                        placeholder="Nhập Cloudflare API Token của bạn" 
+                        value={cfToken}
+                        onChange={e => setCfToken(e.target.value)}
+                        className="input-glass w-full text-xs font-mono" 
+                      />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 text-xs">Email tài khoản Cloudflare:</label>
+                        <input 
+                          type="email" 
+                          required 
+                          placeholder="vd: email@cloudflare.com" 
+                          value={cfEmail}
+                          onChange={e => setCfEmail(e.target.value)}
+                          className="input-glass w-full text-xs" 
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 text-xs">Cloudflare Global API Key:</label>
+                        <input 
+                          type="password" 
+                          required 
+                          placeholder="Nhập Global API Key" 
+                          value={cfKey}
+                          onChange={e => setCfKey(e.target.value)}
+                          className="input-glass w-full text-xs font-mono" 
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button type="submit" className="btn btn-primary text-xs" disabled={submittingSsl}>
+                    {submittingSsl ? 'Đang gửi yêu cầu...' : 'Đăng ký & Cài đặt'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {sslMode === 'custom' && (
+              <form onSubmit={handleInstallCustomSSL} className="card-glass p-5 rounded-lg space-y-4 text-sm max-w-xl border border-white/10">
+                <h5 className="font-bold text-green-400">Cấu hình SSL Custom (Tự tải lên)</h5>
+                
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-medium">Chọn hoặc nhập Tên miền cấu hình:</label>
+                  <input 
+                    type="text" 
+                    required 
+                    placeholder="vd: mywebsite.com" 
+                    value={customDomain}
+                    onChange={e => setCustomDomain(e.target.value)}
+                    className="input-glass w-full text-xs" 
+                    list="ssl-site-domains"
+                  />
+                  <datalist id="ssl-site-domains">
+                    {sites.map(s => <option key={s.domain} value={s.domain} />)}
+                  </datalist>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-medium">Nội dung Certificate (.crt / .pem / fullchain):</label>
+                  <textarea 
+                    required 
+                    placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" 
+                    value={customCertText}
+                    onChange={e => setCustomCertText(e.target.value)}
+                    className="input-glass w-full font-mono text-xs" 
+                    style={{ height: '120px' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-medium">Nội dung Private Key (.key):</label>
+                  <textarea 
+                    required 
+                    placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" 
+                    value={customKeyText}
+                    onChange={e => setCustomKeyText(e.target.value)}
+                    className="input-glass w-full font-mono text-xs" 
+                    style={{ height: '120px' }}
+                  />
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button type="submit" className="btn btn-primary text-xs" disabled={submittingSsl}>
+                    {submittingSsl ? 'Đang cài đặt...' : 'Cài đặt Custom SSL'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
         </div>
       )}
 
@@ -656,7 +1075,325 @@ export default function WebServer() {
         </div>
       )}
 
+      {/* Tab 5: Nginx Config Scanner */}
+      {activeTab === 'scanner' && (
+        <div className="space-y-5">
+          {/* Header toolbar */}
+          <div className="card-glass p-5 rounded-xl" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <div>
+              <h3 className="font-bold text-base flex items-center gap-2" style={{ color: '#e2e8f0' }}>
+                <ScanSearch size={20} style={{ color: '#818cf8' }} />
+                Nginx Config Error Scanner
+              </h3>
+              <p className="text-xs mt-1" style={{ color: '#6b7280' }}>
+                Chạy lệnh <code style={{ background: 'rgba(255,255,255,0.07)', padding: '1px 5px', borderRadius: '3px', color: '#a78bfa' }}>nginx -t</code> trực tiếp trên VPS và phân tích kết quả để phát hiện lỗi cú pháp cấu hình.
+              </p>
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={handleScanNginx}
+              disabled={scanning}
+              style={{ minWidth: '140px', display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              <ScanSearch size={15} className={scanning ? 'animate-pulse' : ''} />
+              {scanning ? 'Đang quét...' : 'Quét ngay'}
+            </button>
+          </div>
+
+          {/* Loading state */}
+          {scanning && (
+            <div className="card-glass p-10 rounded-xl text-center" style={{ color: '#818cf8' }}>
+              <ScanSearch size={32} className="animate-pulse mx-auto mb-3" style={{ opacity: 0.7 }} />
+              <p className="text-sm">Đang kết nối SSH và chạy <code>nginx -t</code> trên VPS...</p>
+            </div>
+          )}
+
+          {/* Scan results */}
+          {!scanning && scanResult && (
+            <div className="space-y-4">
+              {/* Status Banner */}
+              <div
+                className="card-glass p-5 rounded-xl flex items-center gap-4"
+                style={{
+                  border: scanResult.passed ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(239,68,68,0.3)',
+                  background: scanResult.passed
+                    ? 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, transparent 100%)'
+                    : 'linear-gradient(135deg, rgba(239,68,68,0.08) 0%, transparent 100%)'
+                }}
+              >
+                {scanResult.passed
+                  ? <CheckCircle2 size={32} style={{ color: '#10b981', flexShrink: 0 }} />
+                  : <XCircle size={32} style={{ color: '#ef4444', flexShrink: 0 }} />
+                }
+                <div style={{ flex: 1 }}>
+                  <p className="font-bold text-sm" style={{ color: scanResult.passed ? '#34d399' : '#f87171' }}>
+                    {scanResult.passed
+                      ? '✅ Cấu hình Nginx hoàn toàn hợp lệ!'
+                      : `❌ Phát hiện ${scanResult.errors.length} vấn đề trong cấu hình Nginx`
+                    }
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>
+                    {scanResult.passed
+                      ? 'nginx -t chạy không có lỗi. Tất cả file cấu hình đều đúng cú pháp.'
+                      : 'Nginx hiện đang hoạt động với cấu hình có lỗi tiềm ẩn. Hãy kiểm tra từng mục bên dưới.'
+                    }
+                  </p>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div className="text-xs" style={{ color: '#6b7280' }}>Tổng files quét</div>
+                  <div className="text-xl font-bold font-mono" style={{ color: '#818cf8' }}>{scanResult.allFiles?.length || 0}</div>
+                </div>
+              </div>
+
+              {/* Error List */}
+              {scanResult.errors.length > 0 && (
+                <div className="space-y-3">
+                  <h4 className="text-sm font-bold" style={{ color: '#e2e8f0' }}>
+                    Danh sách vấn đề phát hiện ({scanResult.errors.length})
+                  </h4>
+                  {scanResult.errors.map((err, idx) => {
+                    const fileKey = err.file;
+                    const contextData = scanResult.errorDetails?.find(d => d.file === err.file);
+                    const isExpanded = expandedFile === `${idx}`;
+                    // Detect auto-fix type
+                    const isMissingSemicolon = err.message?.toLowerCase().includes('unexpected') || err.message?.toLowerCase().includes('directive');
+                    const isPhpSocket = err.message?.toLowerCase().includes('fastcgi') || err.message?.toLowerCase().includes('php') || err.message?.toLowerCase().includes('socket');
+                    const isDuplicateDefault = err.message?.toLowerCase().includes('duplicate') || err.message?.toLowerCase().includes('default_server');
+
+                    return (
+                      <div
+                        key={idx}
+                        className="card-glass rounded-xl overflow-hidden"
+                        style={{
+                          border: err.severity === 'error'
+                            ? '1px solid rgba(239,68,68,0.2)'
+                            : '1px solid rgba(251,191,36,0.2)'
+                        }}
+                      >
+                        {/* Error header */}
+                        <div
+                          className="p-4"
+                          style={{
+                            background: err.severity === 'error'
+                              ? 'rgba(239,68,68,0.06)'
+                              : 'rgba(251,191,36,0.05)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                            {err.severity === 'error'
+                              ? <XCircle size={16} style={{ color: '#f87171', flexShrink: 0, marginTop: '2px' }} />
+                              : <AlertTriangle size={16} style={{ color: '#fbbf24', flexShrink: 0, marginTop: '2px' }} />
+                            }
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                                <span
+                                  className="text-xs font-bold px-2 py-0.5 rounded"
+                                  style={{
+                                    background: err.severity === 'error' ? 'rgba(239,68,68,0.2)' : 'rgba(251,191,36,0.2)',
+                                    color: err.severity === 'error' ? '#fca5a5' : '#fde68a',
+                                  }}
+                                >
+                                  {err.severity === 'error' ? 'EMERG' : 'WARN'}
+                                </span>
+                                {err.file && (
+                                  <code className="text-xs" style={{ color: '#818cf8' }}>
+                                    {err.file.split('/').pop()}
+                                    {err.line && <span style={{ color: '#6b7280' }}>:{err.line}</span>}
+                                  </code>
+                                )}
+                              </div>
+                              <p className="text-sm font-mono" style={{ color: '#e2e8f0', wordBreak: 'break-word' }}>{err.message}</p>
+                              {err.file && (
+                                <p className="text-xs mt-1" style={{ color: '#6b7280' }}>{err.file}</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                            {err.file && contextData && (
+                              <button
+                                className="btn btn-glass btn-xs"
+                                onClick={() => setExpandedFile(isExpanded ? null : `${idx}`)}
+                                style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px' }}
+                              >
+                                {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                {isExpanded ? 'Thu gọn' : 'Xem code context'}
+                              </button>
+                            )}
+                            {isMissingSemicolon && err.file && (
+                              <button
+                                className="btn btn-xs"
+                                onClick={() => handleFixNginx('add_semicolon', err.file, err.line)}
+                                disabled={!!fixingIssue}
+                                style={{
+                                  fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px',
+                                  background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)',
+                                  borderRadius: '6px', cursor: fixingIssue ? 'not-allowed' : 'pointer'
+                                }}
+                              >
+                                <Wrench size={11} />
+                                {fixingIssue === `${err.file}:add_semicolon` ? 'Đang sửa...' : 'Thêm dấu chấm phẩy'}
+                              </button>
+                            )}
+                            {isPhpSocket && err.file && (
+                              <button
+                                className="btn btn-xs"
+                                onClick={() => handleFixNginx('fix_php_socket', err.file, err.line)}
+                                disabled={!!fixingIssue}
+                                style={{
+                                  fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px',
+                                  background: 'rgba(16,185,129,0.15)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.3)',
+                                  borderRadius: '6px', cursor: fixingIssue ? 'not-allowed' : 'pointer'
+                                }}
+                              >
+                                <Wrench size={11} />
+                                {fixingIssue === `${err.file}:fix_php_socket` ? 'Đang sửa...' : 'Sửa PHP-FPM socket'}
+                              </button>
+                            )}
+                            {isDuplicateDefault && err.file && (
+                              <button
+                                className="btn btn-xs"
+                                onClick={() => handleFixNginx('remove_duplicate_default', err.file, err.line)}
+                                disabled={!!fixingIssue}
+                                style={{
+                                  fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px',
+                                  background: 'rgba(245,158,11,0.15)', color: '#fde68a', border: '1px solid rgba(245,158,11,0.3)',
+                                  borderRadius: '6px', cursor: fixingIssue ? 'not-allowed' : 'pointer'
+                                }}
+                              >
+                                <Wrench size={11} />
+                                {fixingIssue === `${err.file}:remove_duplicate_default` ? 'Đang sửa...' : 'Gỡ duplicate default'}
+                              </button>
+                            )}
+                            <button
+                              className="btn btn-xs"
+                              onClick={() => handleFixNginx('reload_only', err.file || '/etc/nginx/nginx.conf', null)}
+                              disabled={!!fixingIssue}
+                              style={{
+                                fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px',
+                                background: 'rgba(255,255,255,0.04)', color: '#9ca3af', border: '1px solid rgba(255,255,255,0.08)',
+                                borderRadius: '6px', cursor: fixingIssue ? 'not-allowed' : 'pointer'
+                              }}
+                            >
+                              <RotateCw size={11} />
+                              Reload Nginx
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Expandable code context */}
+                        {isExpanded && contextData && (
+                          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                            <pre
+                              style={{
+                                fontFamily: 'monospace',
+                                fontSize: '12px',
+                                padding: '16px',
+                                margin: 0,
+                                background: 'rgba(0,0,0,0.4)',
+                                color: '#d1d5db',
+                                overflowX: 'auto',
+                                maxHeight: '300px',
+                                overflowY: 'auto',
+                                lineHeight: 1.6
+                              }}
+                            >
+                              {contextData.content.split('\n').map((line, li) => {
+                                const lineNum = li + 1;
+                                const isErrLine = err.line && Math.abs(lineNum - err.line) <= 1;
+                                return (
+                                  <div
+                                    key={li}
+                                    style={{
+                                      background: isErrLine ? 'rgba(239,68,68,0.15)' : 'transparent',
+                                      borderLeft: isErrLine ? '3px solid #ef4444' : '3px solid transparent',
+                                      paddingLeft: '8px',
+                                      borderRadius: '2px'
+                                    }}
+                                  >
+                                    <span style={{ color: '#4b5563', userSelect: 'none', marginRight: '12px', minWidth: '30px', display: 'inline-block', textAlign: 'right' }}>
+                                      {lineNum}
+                                    </span>
+                                    {line}
+                                  </div>
+                                );
+                              })}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Raw nginx -t output */}
+              <div className="card-glass p-4 rounded-xl">
+                <h4 className="text-xs font-bold mb-2" style={{ color: '#6b7280' }}>
+                  OUTPUT: <code style={{ color: '#a78bfa' }}>nginx -t</code> raw
+                </h4>
+                <pre
+                  style={{
+                    fontFamily: 'monospace',
+                    fontSize: '11px',
+                    color: scanResult.passed ? '#34d399' : '#f87171',
+                    background: 'rgba(0,0,0,0.35)',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    maxHeight: '150px',
+                    overflowY: 'auto',
+                    border: '1px solid rgba(255,255,255,0.05)'
+                  }}
+                >
+                  {scanResult.rawOutput || '(Không có output)'}
+                </pre>
+              </div>
+
+              {/* Config files list */}
+              {scanResult.allFiles?.length > 0 && (
+                <div className="card-glass p-4 rounded-xl">
+                  <h4 className="text-xs font-bold mb-3" style={{ color: '#6b7280' }}>
+                    FILES ĐƯỢC QUÉT ({scanResult.allFiles.length} files)
+                  </h4>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {scanResult.allFiles.map((f, i) => {
+                      const hasError = scanResult.errors.some(e => e.file === f);
+                      return (
+                        <span
+                          key={i}
+                          className="font-mono text-xs px-2 py-1 rounded"
+                          style={{
+                            background: hasError ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.04)',
+                            color: hasError ? '#fca5a5' : '#6b7280',
+                            border: hasError ? '1px solid rgba(239,68,68,0.2)' : '1px solid rgba(255,255,255,0.06)',
+                          }}
+                        >
+                          {hasError && '⚠ '}
+                          {f.split('/').pop()}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!scanning && !scanResult && (
+            <div className="card-glass p-12 rounded-xl text-center" style={{ color: '#4b5563' }}>
+              <ScanSearch size={40} className="mx-auto mb-3" style={{ opacity: 0.4 }} />
+              <p className="text-sm">Nhấn nút <b style={{ color: '#818cf8' }}>Quét ngay</b> để phân tích cấu hình Nginx trên VPS.</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Add Site Modal */}
+
       {showAddModal && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ width: '450px' }}>
@@ -744,6 +1481,28 @@ export default function WebServer() {
               <button className="btn btn-primary" onClick={handleSaveConfig} disabled={savingConfig}>
                 {savingConfig ? 'Đang lưu...' : 'Lưu & Reload'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Test SSL Auto-Renew Modal */}
+      {showTestModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ width: '700px', maxWidth: '95%' }}>
+            <div className="modal-header">
+              <h2>Kết quả Chạy thử Gia hạn SSL Let's Encrypt (Dry Run)</h2>
+              <button onClick={() => setShowTestModal(false)} className="modal-close-btn"><X size={18} /></button>
+            </div>
+            <div className="modal-body" style={{ padding: '16px' }}>
+              <p className="text-xs text-gray-400 mb-3">
+                Tiến trình này đang giả lập lệnh `certbot renew --dry-run` để kiểm tra khả năng gia hạn thành công cho tất cả chứng chỉ mà không ảnh hưởng thực tế tới chứng chỉ hiện tại.
+              </p>
+              <pre className="bg-black/60 text-green-400 p-4 font-mono text-xs h-[300px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/10">
+                {renewTestLogs}
+              </pre>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-primary" onClick={() => setShowTestModal(false)}>Đóng</button>
             </div>
           </div>
         </div>

@@ -653,6 +653,12 @@ body::before {
   width: 100%;
 }
 
+.form-group select option,
+.input-glass option {
+  background-color: #0c0c1e !important;
+  color: var(--text-main) !important;
+}
+
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus,

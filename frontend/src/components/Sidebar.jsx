@@ -18,13 +18,15 @@ import {
   Bell,
   Sliders,
   Zap,
-  Mail
+  Mail,
+  Rocket
 } from 'lucide-react';
 
 const MENU_ITEMS = [
   { id: 'dashboard', label: 'Tổng quan', icon: Gauge },
   { id: 'services', label: 'Cài đặt Dịch vụ', icon: Cpu },
-  { id: 'scripts', label: 'Cài nhanh Web/App', icon: TerminalSquare },
+  { id: 'installer', label: 'Cài đặt 1-Click', icon: Rocket },
+  { id: 'scripts', label: 'Chạy Scripts', icon: TerminalSquare },
   { id: 'webserver', label: 'Web Server', icon: Globe },
   { id: 'stats', label: 'Thống kê truy cập', icon: BarChart2 },
   { id: 'phpconfig', label: 'Cấu hình PHP', icon: Sliders },

@@ -78,7 +78,8 @@ export default function Terminal() {
     window.addEventListener('resize', handleResize);
 
     // Delay resize request slightly after mount
-    setTimeout(handleResize, 500);
+    setTimeout(handleResize, 100);
+    setTimeout(handleResize, 400);
 
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -100,6 +101,7 @@ export default function Terminal() {
       <div className="flex-1 card-glass p-3 rounded-xl overflow-hidden min-h-[400px] flex">
         <div
           ref={terminalRef}
+          id="terminal"
           className="w-full h-full rounded-lg overflow-hidden"
         />
       </div>

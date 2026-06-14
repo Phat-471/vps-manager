@@ -21,12 +21,14 @@ import Alerts from './pages/Alerts';
 import PHPConfig from './pages/PHPConfig';
 import NodeConfig from './pages/NodeConfig';
 import MailConfig from './pages/MailConfig';
+import AppInstaller from './pages/AppInstaller';
 import './index.css';
 
 const pageMap = {
   dashboard: <Dashboard />,
   services: <Services />,
   webserver: <WebServer />,
+  installer: <AppInstaller />,
   stats: <TrafficStats />,
   mysql: <MySQL />,
   applications: <Applications />,

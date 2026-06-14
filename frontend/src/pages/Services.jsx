@@ -94,6 +94,25 @@ export default function Services() {
     }
   };
 
+
+  const handleUninstallSoftware = async (softwareId) => {
+    if (!window.confirm(`CẢNH BÁO: Bạn có chắc chắn muốn gỡ cài đặt hoàn toàn ${softwareId} khỏi VPS? Thao tác này sẽ xóa mọi cấu hình và tệp liên quan.`)) return;
+
+    showToast(`Đang tiến hành gỡ cài đặt ${softwareId}...`, 'info');
+    setLogs(prev => prev + `>> [GỠ CÀI ĐẶT] ${new Date().toLocaleTimeString()}: Bắt đầu gỡ cài đặt ${softwareId}...\n`);
+
+    try {
+      const result = await apiCall('/api/software/uninstall', 'POST', { softwareId });
+      if (result.success) {
+        showToast(`Đã gỡ cài đặt ${softwareId} thành công`, 'success');
+        setLogs(prev => prev + `>> [GỠ CÀI ĐẶT] ${new Date().toLocaleTimeString()}: ${result.message || 'Thành công'}\n`);
+        checkInstalledSoftware();
+      }
+    } catch (err) {
+      showToast(`Lỗi gỡ cài đặt ${softwareId}: ` + err.message, 'error');
+    }
+  };
+
   const handleUpdateSystem = async () => {
     if (!window.confirm('Bạn có chắc chắn muốn cập nhật toàn bộ hệ thống? (apt-get update & upgrade)')) return;
 
@@ -160,12 +179,31 @@ export default function Services() {
                   {sw.desc}
                 </p>
                 <div className="mt-auto">
-                  <button 
-                    className={`btn btn-block py-2 text-xs rounded-lg font-semibold ${isInstalled ? 'btn-secondary text-gray-400' : 'btn-primary'}`}
-                    onClick={() => handleInstallSoftware(sw.id)}
-                  >
-                    {isInstalled ? 'Cài đặt lại' : 'Cài đặt ngay'}
-                  </button>
+                  {isInstalled ? (
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button 
+                        className="btn btn-secondary py-2 text-xs rounded-lg font-semibold flex-grow"
+                        onClick={() => handleInstallSoftware(sw.id)}
+                        style={{ padding: '8px 4px' }}
+                      >
+                        Cài lại
+                      </button>
+                      <button 
+                        className="btn btn-danger py-2 text-xs rounded-lg font-semibold flex-grow"
+                        onClick={() => handleUninstallSoftware(sw.id)}
+                        style={{ padding: '8px 4px' }}
+                      >
+                        Gỡ
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      className="btn btn-block py-2 text-xs rounded-lg font-semibold btn-primary"
+                      onClick={() => handleInstallSoftware(sw.id)}
+                    >
+                      Cài đặt ngay
+                    </button>
+                  )}
                 </div>
               </div>
             );

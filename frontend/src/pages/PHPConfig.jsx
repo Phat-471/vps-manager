@@ -227,24 +227,16 @@ export default function PHPConfig() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-white/10 mb-6 gap-2" style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '24px', gap: '8px' }}>
+      <div className="db-tabs-container">
         <button 
           onClick={() => setActiveTab('config')}
-          className={`pb-3 px-4 text-sm font-semibold transition-all relative ${
-            activeTab === 'config' 
-              ? 'text-indigo-400 border-b-2 border-indigo-500' 
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
+          className={`db-tab-item ${activeTab === 'config' ? 'active' : ''}`}
         >
           Cấu hình & Extensions
         </button>
         <button 
           onClick={() => setActiveTab('versions')}
-          className={`pb-3 px-4 text-sm font-semibold transition-all relative ${
-            activeTab === 'versions' 
-              ? 'text-indigo-400 border-b-2 border-indigo-500' 
-              : 'text-gray-400 hover:text-gray-200'
-          }`}
+          className={`db-tab-item ${activeTab === 'versions' ? 'active' : ''}`}
         >
           Quản lý Phiên bản PHP
         </button>

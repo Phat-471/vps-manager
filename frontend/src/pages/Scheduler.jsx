@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useVPS } from '../context/VPSContext';
 import { 
   Clock, 
@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 
 export default function Scheduler() {
-  const { apiCall, showToast, currentVPS, panelToken } = useVPS();
+  const { apiCall, showToast, currentVPS, panelToken, socket } = useVPS();
   const [activeTab, setActiveTab] = useState('cron');
   const [loading, setLoading] = useState(false);
 
@@ -44,6 +44,17 @@ export default function Scheduler() {
   const [useRclone, setUseRclone] = useState(false);
   const [rcloneRemote, setRcloneRemote] = useState('');
   const [rclonePath, setRclonePath] = useState('');
+
+  // New Rclone Remote Manager states
+  const [remotes, setRemotes] = useState({});
+  const [showRcloneModal, setShowRcloneModal] = useState(false);
+  const [editingRemoteName, setEditingRemoteName] = useState(null);
+  const [remoteName, setRemoteName] = useState('');
+  const [remoteType, setRemoteType] = useState('drive');
+  const [remoteParams, setRemoteParams] = useState({});
+  const [remoteRawConfig, setRemoteRawConfig] = useState('');
+  const [remoteInputMode, setRemoteInputMode] = useState('form');
+  const [testingRemote, setTestingRemote] = useState(null);
 
   // Form states for Cron Job
   const [cronName, setCronName] = useState('');
@@ -72,6 +83,13 @@ export default function Scheduler() {
   // Command Run Log State
   const [runLog, setRunLog] = useState(null);
   const [runningJob, setRunningJob] = useState(false);
+  const logContainerRef = useRef(null);
+
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [runLog]);
 
   useEffect(() => {
     fetchData();
@@ -194,31 +212,159 @@ export default function Scheduler() {
     }
   };
 
-  const handleTestCron = async (command) => {
-    setRunningJob(true);
-    setRunLog('Đang thực thi lệnh trên VPS...');
-    try {
-      const res = await apiCall('/api/cron/run', 'POST', { command });
-      let output = `[Exit Code: ${res.data.code}]\n`;
-      if (res.data.stdout) output += `STDOUT:\n${res.data.stdout}\n`;
-      if (res.data.stderr) output += `STDERR:\n${res.data.stderr}\n`;
-      setRunLog(output || 'Lệnh đã chạy xong nhưng không có dữ liệu trả về.');
-    } catch (err) {
-      setRunLog(`Lỗi thực thi: ${err.message}`);
-    } finally {
-      setRunningJob(false);
+  const runTaskStream = (command, onComplete = () => {}) => {
+    if (!socket) {
+      showToast('Kết nối WebSocket chưa sẵn sàng', 'error');
+      return;
     }
+    setRunningJob(true);
+    setRunLog(`[Task Runner] Khởi động tác vụ...\nLệnh: ${command}\n\n`);
+
+    socket.off('task:output');
+    socket.off('task:ended');
+
+    socket.on('task:output', (data) => {
+      setRunLog(prev => (prev || '') + data);
+    });
+
+    socket.on('task:ended', ({ code, error }) => {
+      setRunningJob(false);
+      if (error) {
+        setRunLog(prev => (prev || '') + `\n[LỖI] ${error}\n`);
+        showToast(`Tác vụ thất bại: ${error}`, 'error');
+      } else {
+        setRunLog(prev => (prev || '') + `\n[Tác vụ hoàn tất với mã thoát: ${code}]\n`);
+        showToast('Tác vụ thực thi hoàn tất!', 'success');
+      }
+      socket.off('task:output');
+      socket.off('task:ended');
+      onComplete(code, error);
+    });
+
+    socket.emit('task:run', { vpsConfig: currentVPS, command });
+  };
+
+  const handleTestCron = async (command) => {
+    runTaskStream(`timeout 60 ${command}`);
   };
 
   // Rclone logic
+  const fetchRcloneRemotes = async () => {
+    try {
+      const res = await apiCall('/api/backups/rclone/remotes', 'POST');
+      if (res.success) {
+        setRemotes(res.remotes || {});
+        // Update status
+        setRcloneStatus(prev => ({
+          ...prev,
+          installed: res.installed,
+          configured: Object.keys(res.remotes || {}).length > 0
+        }));
+      }
+    } catch (err) {
+      console.error('Lỗi check rclone remotes:', err);
+    }
+  };
+
   const fetchRcloneStatus = async () => {
     try {
       const res = await apiCall('/api/backups/rclone/status', 'POST');
       if (res.success && res.data) {
         setRcloneStatus(res.data);
+        if (res.data.installed) {
+          fetchRcloneRemotes();
+        }
       }
     } catch (err) {
       console.error('Lỗi check rclone status:', err);
+    }
+  };
+
+  const handleOpenAddRemote = () => {
+    setEditingRemoteName(null);
+    setRemoteName('');
+    setRemoteType('drive');
+    setRemoteParams({});
+    setRemoteRawConfig('');
+    setRemoteInputMode('form');
+    setShowRcloneModal(true);
+  };
+
+  const handleOpenEditRemote = (name, config) => {
+    setEditingRemoteName(name);
+    setRemoteName(name);
+    setRemoteType(config.type || 'drive');
+    const { type, ...params } = config;
+    setRemoteParams(params);
+    
+    // Generate raw config string
+    let raw = `[${name}]\ntype = ${config.type || 'drive'}\n`;
+    for (const [k, v] of Object.entries(params)) {
+      raw += `${k} = ${v}\n`;
+    }
+    setRemoteRawConfig(raw);
+    setRemoteInputMode('form');
+    setShowRcloneModal(true);
+  };
+
+  const handleSaveRemote = async (e) => {
+    e.preventDefault();
+    if (!remoteName.trim() && remoteInputMode === 'form') {
+      showToast('Vui lòng nhập tên Remote', 'warning');
+      return;
+    }
+
+    try {
+      showToast('Đang lưu cấu hình Remote...', 'info');
+      const payload = {
+        name: remoteName.trim(),
+        type: remoteType,
+        parameters: remoteParams
+      };
+      if (remoteInputMode === 'raw') {
+        payload.rawConfig = remoteRawConfig.trim();
+      }
+      const res = await apiCall('/api/backups/rclone/remotes/save', 'POST', payload);
+      if (res.success) {
+        showToast('Đã lưu cấu hình Remote thành công', 'success');
+        setShowRcloneModal(false);
+        fetchRcloneRemotes();
+      }
+    } catch (err) {
+      showToast('Lỗi khi lưu cấu hình remote: ' + err.message, 'error');
+    }
+  };
+
+  const handleDeleteRemote = async (name) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa Cloud Remote "${name}"?`)) return;
+    try {
+      showToast('Đang xóa remote...', 'info');
+      const res = await apiCall('/api/backups/rclone/remotes/delete', 'POST', { name });
+      if (res.success) {
+        showToast('Đã xóa remote thành công', 'success');
+        fetchRcloneRemotes();
+      }
+    } catch (err) {
+      showToast('Lỗi khi xóa remote: ' + err.message, 'error');
+    }
+  };
+
+  const handleTestRemote = async (name) => {
+    setTestingRemote(name);
+    showToast(`Đang kết nối thử đến remote "${name}"...`, 'info');
+    try {
+      const res = await apiCall('/api/backups/rclone/remotes/test', 'POST', { name });
+      if (res.success) {
+        showToast(`Kết nối đến remote "${name}" thành công!`, 'success');
+        setRunLog(`[Kết nối THÀNH CÔNG đến ${name}:]\n\nSTDOUT:\n${res.stdout}\n`);
+      } else {
+        showToast(`Kết nối đến remote "${name}" thất bại!`, 'error');
+        setRunLog(`[Kết nối THẤT BẠI đến ${name}:]\n\nSTDERR:\n${res.stderr || 'Không thể liên kết hoặc sai thông tin.'}\n`);
+      }
+    } catch (err) {
+      showToast('Lỗi khi test remote: ' + err.message, 'error');
+    } finally {
+      setTestingRemote(null);
     }
   };
 
@@ -322,31 +468,10 @@ export default function Scheduler() {
 
     try {
       if (isManualBackup) {
-        // Run manual backup immediately
-        showToast('Đang chạy sao lưu dữ liệu...', 'info');
-        setRunningJob(true);
-        setRunLog('Bắt đầu tiến trình sao lưu trên VPS...');
-        const manualType = backupType;
-        const bodyData = {
-          type: manualType,
-          keep: backupKeepCount
-        };
-        if (manualType === 'dir') {
-          bodyData.source = backupSourceDir.trim();
-          bodyData.name = backupCustomName.trim() || backupSourceDir.split('/').filter(Boolean).pop() || 'web';
-        } else {
-          bodyData.database = backupDatabase;
-          bodyData.dbUser = backupDbUser;
-          bodyData.dbPass = backupDbPass;
-        }
-        if (useRclone && rcloneRemote.trim()) {
-          bodyData.rcloneRemote = rcloneRemote.trim();
-          bodyData.rclonePath = rclonePath.trim();
-        }
-
-        const res = await apiCall('/api/backups/create', 'POST', bodyData);
-        showToast(res.message, 'success');
-        setRunLog(res.log || 'Sao lưu hoàn tất không có log chi tiết.');
+        setShowBackupModal(false);
+        runTaskStream(command, () => {
+          fetchData();
+        });
       } else {
         // Save backup schedule in Cron
         await apiCall('/api/cron/add', 'POST', {
@@ -356,15 +481,12 @@ export default function Scheduler() {
           active: true
         });
         showToast('Đã lập lịch sao lưu tự động thành công!', 'success');
+        setShowBackupModal(false);
+        fetchData();
       }
-
-      setShowBackupModal(false);
-      fetchData();
     } catch (err) {
       console.error(err);
-      setRunLog(`Lỗi tiến trình sao lưu:\n${err.message}`);
-    } finally {
-      setRunningJob(false);
+      showToast(err.message, 'error');
     }
   };
 
@@ -431,27 +553,41 @@ export default function Scheduler() {
     e.preventDefault();
     if (!selectedBackup) return;
 
-    try {
-      showToast('Đang tiến hành khôi phục dữ liệu trên VPS...', 'info');
-      setRunningJob(true);
-      setRunLog('Bắt đầu tiến trình khôi phục dữ liệu trên VPS...');
-      const res = await apiCall('/api/backups/restore', 'POST', {
-        filename: selectedBackup.filename,
-        restorePath: selectedBackup.type === 'dir' ? restorePath.trim() : undefined,
-        dbUser: selectedBackup.type === 'mysql' ? restoreDbUser : undefined,
-        dbPass: selectedBackup.type === 'mysql' ? restoreDbPass : undefined,
-        cleanTarget: selectedBackup.type === 'dir' ? cleanTarget : undefined,
-        dropDatabase: selectedBackup.type === 'mysql' ? dropDatabase : undefined
-      });
-      showToast(res.message, 'success');
-      setRunLog(res.log || 'Khôi phục hoàn tất không có log chi tiết.');
-      setShowRestoreModal(false);
-    } catch (err) {
-      console.error(err);
-      setRunLog(`Lỗi tiến trình khôi phục:\n${err.message}`);
-    } finally {
-      setRunningJob(false);
+    let command = '';
+    const backupFilePath = `/var/www/vps-manager-backups/${selectedBackup.filename}`;
+    
+    if (selectedBackup.type === 'dir') {
+      const cleanPath = restorePath.trim();
+      if (!cleanPath) {
+        showToast('Vui lòng cung cấp đường dẫn thư mục khôi phục', 'warning');
+        return;
+      }
+      if (cleanPath === '/' || cleanPath === '' || cleanPath.split('/').filter(Boolean).length <= 1) {
+        showToast('Đường dẫn thư mục quá ngắn hoặc không an toàn', 'warning');
+        return;
+      }
+      if (cleanTarget) {
+        command += `echo "[INFO] Đang làm sạch thư mục đích: ${cleanPath}..." && rm -rf "${cleanPath}"/* && `;
+      }
+      command += `echo "[INFO] Đang giải nén tệp sao lưu vào ${cleanPath}..." && mkdir -p "${cleanPath}" && tar -xzf "${backupFilePath}" -C "${cleanPath}"`;
+    } else if (selectedBackup.type === 'mysql') {
+      const dbName = selectedBackup.targetName;
+      if (dropDatabase) {
+        command += `echo "[INFO] Đang xóa (Drop) cơ sở dữ liệu cũ \`${dbName}\`..." && mysql -e "DROP DATABASE IF EXISTS \\\`${dbName}\\\`; CREATE DATABASE \\\`${dbName}\\\`;" && `;
+      } else {
+        command += `echo "[INFO] Khởi tạo cơ sở dữ liệu \`${dbName}\` nếu chưa tồn tại..." && mysql -e "CREATE DATABASE IF NOT EXISTS \\\`${dbName}\\\`;" && `;
+      }
+      let importCmd = `gunzip -c "${backupFilePath}" | mysql `;
+      if (restoreDbPass) {
+        importCmd += `-u${restoreDbUser || 'root'} -p'${restoreDbPass.replace(/'/g, "'\\''")}' ${dbName}`;
+      } else {
+        importCmd += `-u${restoreDbUser || 'root'} ${dbName}`;
+      }
+      command += `echo "[INFO] Đang nạp cơ sở dữ liệu từ tệp nén..." && ${importCmd}`;
     }
+
+    setShowRestoreModal(false);
+    runTaskStream(command);
   };
 
   return (
@@ -495,32 +631,28 @@ export default function Scheduler() {
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-white/10 pb-px" style={{ display: 'flex', gap: '24px' }}>
+      <div className="db-tabs-container card-glass p-1.5 flex gap-2 rounded-xl">
         <button
           onClick={() => setActiveTab('cron')}
-          className={`pb-3 text-sm font-semibold tracking-wide border-b-2 transition-all ${
+          className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${
             activeTab === 'cron'
-              ? 'border-indigo-500 text-indigo-400'
-              : 'border-transparent text-gray-400 hover:text-gray-200'
+              ? 'active bg-indigo-500/20 text-indigo-300'
+              : 'text-gray-400 hover:text-white'
           }`}
-          style={{ background: 'none', cursor: 'pointer' }}
+          style={{ border: 'none', cursor: 'pointer' }}
         >
-          <span className="flex items-center gap-2">
-            <Clock size={16} /> Tác vụ Lập lịch (Cron)
-          </span>
+          <Clock size={16} /> Tác vụ Lập lịch (Cron)
         </button>
         <button
           onClick={() => setActiveTab('backup')}
-          className={`pb-3 text-sm font-semibold tracking-wide border-b-2 transition-all ${
+          className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${
             activeTab === 'backup'
-              ? 'border-indigo-500 text-indigo-400'
-              : 'border-transparent text-gray-400 hover:text-gray-200'
+              ? 'active bg-indigo-500/20 text-indigo-300'
+              : 'text-gray-400 hover:text-white'
           }`}
-          style={{ background: 'none', cursor: 'pointer' }}
+          style={{ border: 'none', cursor: 'pointer' }}
         >
-          <span className="flex items-center gap-2">
-            <Database size={16} /> Sao lưu & Khôi phục
-          </span>
+          <Database size={16} /> Sao lưu & Khôi phục
         </button>
       </div>
 
@@ -776,6 +908,14 @@ export default function Scheduler() {
                     {rcloneLoading ? 'Đang cài đặt...' : 'Cài đặt Rclone'}
                   </button>
                 )}
+                {rcloneStatus.installed && (
+                  <button
+                    onClick={handleOpenAddRemote}
+                    className="btn btn-primary btn-sm flex items-center gap-1.5"
+                  >
+                    <Plus size={14} /> Thêm Cloud Remote
+                  </button>
+                )}
                 <button 
                   onClick={fetchRcloneStatus} 
                   disabled={rcloneLoading}
@@ -807,11 +947,76 @@ export default function Scheduler() {
 
               <div className="p-4 bg-white/5 rounded-lg border border-white/5 text-xs text-gray-300 space-y-1.5 leading-relaxed font-normal">
                 <span className="text-xs font-semibold text-gray-400 uppercase block mb-1">Hướng dẫn cấu hình Remote</span>
-                <p>1. SSH vào VPS và chạy lệnh: <code className="bg-black/40 px-1.5 py-0.5 rounded font-mono text-indigo-300">rclone config</code></p>
-                <p>2. Tạo một Remote mới (ví dụ tên là: <code className="text-yellow-300">gdrive</code> hoặc <code className="text-yellow-300">s3</code>) và liên kết tài khoản.</p>
-                <p>3. Điền tên Remote đã đặt vào mục sao lưu bên dưới để tự động đồng bộ.</p>
+                <p>1. Sử dụng trình quản lý Cloud Remotes bên dưới để thêm/xóa/sửa cấu hình nhanh chóng.</p>
+                <p>2. Khi lập lịch hoặc sao lưu thủ công, tick vào ô <strong>Đồng bộ lên Cloud</strong> và điền đúng tên Remote để tự động đẩy file lên đám mây.</p>
               </div>
             </div>
+
+            {/* Rclone Remotes List */}
+            {rcloneStatus.installed && (
+              <div className="pt-2">
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Danh sách Cloud Remotes đã thiết lập</h3>
+                {Object.keys(remotes).length === 0 ? (
+                  <div className="p-4 text-center text-xs text-gray-400 bg-white/[0.02] border border-white/5 rounded-lg">
+                    Chưa có Cloud Remote nào được thiết lập. Hãy bấm "Thêm Cloud Remote" để liên kết dịch vụ lưu trữ của bạn.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-white/5 rounded-lg bg-white/[0.01]">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-white/5 bg-white/[0.02] text-gray-400 uppercase font-mono text-[10px] tracking-wider">
+                          <th className="p-3">Tên Remote</th>
+                          <th className="p-3">Dịch vụ lưu trữ</th>
+                          <th className="p-3">Thông số chính</th>
+                          <th className="p-3 text-right" style={{ width: '220px' }}>Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {Object.entries(remotes).map(([name, config]) => (
+                          <tr key={name} className="hover:bg-white/[0.01]">
+                            <td className="p-3 font-semibold text-gray-200">{name}</td>
+                            <td className="p-3">
+                              <span className="badge text-indigo-300 bg-indigo-400/10 px-2 py-0.5 rounded text-[11px] font-mono uppercase">
+                                {config.type}
+                              </span>
+                            </td>
+                            <td className="p-3 font-mono text-gray-400 text-[10px] truncate max-w-[200px]" title={JSON.stringify(config)}>
+                              {Object.entries(config)
+                                .filter(([k]) => k !== 'type' && k !== 'token' && k !== 'secret_access_key')
+                                .map(([k, v]) => `${k}=${v}`)
+                                .join(', ') || 'N/A'}
+                            </td>
+                            <td className="p-3 text-right">
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                <button
+                                  onClick={() => handleTestRemote(name)}
+                                  disabled={testingRemote === name}
+                                  className="btn btn-glass btn-sm text-green-300 flex items-center gap-1"
+                                >
+                                  {testingRemote === name ? 'Đang test...' : 'Test kết nối'}
+                                </button>
+                                <button
+                                  onClick={() => handleOpenEditRemote(name, config)}
+                                  className="btn btn-glass btn-sm text-blue-300"
+                                >
+                                  Sửa
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteRemote(name)}
+                                  className="btn btn-glass btn-sm text-red-400"
+                                >
+                                  Xóa
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -827,7 +1032,7 @@ export default function Scheduler() {
               Đóng log
             </button>
           </div>
-          <pre className="p-4 bg-black/60 text-emerald-400 font-mono text-xs rounded-lg max-h-[300px] overflow-y-auto whitespace-pre-wrap border border-white/5">
+          <pre ref={logContainerRef} className="p-4 bg-black/60 text-emerald-400 font-mono text-xs rounded-lg max-h-[300px] overflow-y-auto whitespace-pre-wrap border border-white/5">
             {runLog}
           </pre>
         </div>
@@ -1250,6 +1455,357 @@ export default function Scheduler() {
                   className="btn btn-danger"
                 >
                   Đồng ý Khôi phục
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL 4: Rclone Remote Configuration */}
+      {showRcloneModal && (
+        <div className="modal-overlay">
+          <div className="modal-content card-glass p-6 max-w-lg w-full rounded-xl space-y-4">
+            <div className="flex justify-between items-center border-b border-white/10 pb-3" style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '12px' }}>
+              <h2 className="text-lg font-bold text-gray-200">
+                {editingRemoteName ? `Chỉnh sửa Remote: ${editingRemoteName}` : 'Cài đặt Cloud Remote mới'}
+              </h2>
+              <button onClick={() => setShowRcloneModal(false)} className="text-gray-400 hover:text-white" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Toggle Mode */}
+            <div className="flex bg-white/5 p-1 rounded-lg border border-white/5 text-xs font-semibold" style={{ display: 'flex', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => setRemoteInputMode('form')}
+                className={`flex-1 py-1.5 rounded transition-all ${
+                  remoteInputMode === 'form' ? 'bg-indigo-500 text-white font-bold' : 'text-gray-400 hover:text-gray-200'
+                }`}
+                style={{ border: 'none', cursor: 'pointer', background: remoteInputMode === 'form' ? '' : 'transparent' }}
+              >
+                Nhập form đơn giản
+              </button>
+              <button
+                type="button"
+                onClick={() => setRemoteInputMode('raw')}
+                className={`flex-1 py-1.5 rounded transition-all ${
+                  remoteInputMode === 'raw' ? 'bg-indigo-500 text-white font-bold' : 'text-gray-400 hover:text-gray-200'
+                }`}
+                style={{ border: 'none', cursor: 'pointer', background: remoteInputMode === 'raw' ? '' : 'transparent' }}
+              >
+                Cấu hình Raw (rclone.conf)
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRemote} className="space-y-4 text-sm">
+              {remoteInputMode === 'form' ? (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-gray-400 font-medium">Tên Remote (Không dấu/cách):</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="VD: gdrive, backups3, myone"
+                      disabled={!!editingRemoteName}
+                      value={remoteName}
+                      onChange={(e) => setRemoteName(e.target.value.replace(/[^a-zA-Z0-9_-]/g, ''))}
+                      className="input-glass w-full font-semibold"
+                      style={{ padding: '8px' }}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-gray-400 font-medium">Dịch vụ đám mây (Provider):</label>
+                    <select
+                      value={remoteType}
+                      onChange={(e) => {
+                        setRemoteType(e.target.value);
+                        setRemoteParams({});
+                      }}
+                      disabled={!!editingRemoteName}
+                      className="input-glass w-full"
+                      style={{ padding: '8px' }}
+                    >
+                      <option value="drive">Google Drive</option>
+                      <option value="s3">Amazon S3 / Compatible (MinIO, R2, Spaces)</option>
+                      <option value="onedrive">Microsoft OneDrive</option>
+                      <option value="dropbox">Dropbox</option>
+                      <option value="sftp">SFTP Connection</option>
+                      <option value="ftp">FTP Connection</option>
+                    </select>
+                  </div>
+
+                  {/* Google Drive fields */}
+                  {remoteType === 'drive' && (
+                    <div className="space-y-2 pt-2 border-t border-white/5">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Client ID (Không bắt buộc):</label>
+                        <input
+                          type="text"
+                          value={remoteParams.client_id || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, client_id: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Client Secret (Không bắt buộc):</label>
+                        <input
+                          type="password"
+                          value={remoteParams.client_secret || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, client_secret: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Scope (Phạm vi):</label>
+                        <select
+                          value={remoteParams.scope || 'drive'}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, scope: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        >
+                          <option value="drive">Full access (drive)</option>
+                          <option value="drive.appfolder">App folder only (drive.appfolder)</option>
+                          <option value="drive.readonly">Read-only (drive.readonly)</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">OAuth Token (JSON từ rclone authorize):</label>
+                        <textarea
+                          rows="3"
+                          placeholder='{"access_token":"ya29...","token_type":"Bearer","refresh_token":"1//...","expiry":"..."}'
+                          value={remoteParams.token || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, token: e.target.value })}
+                          className="input-glass w-full font-mono text-[10px]"
+                          style={{ padding: '6px', resize: 'vertical' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* S3 fields */}
+                  {remoteType === 's3' && (
+                    <div className="space-y-2 pt-2 border-t border-white/5">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">S3 Provider (Nhà cung cấp):</label>
+                        <select
+                          value={remoteParams.provider || 'Minio'}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, provider: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        >
+                          <option value="Minio">MinIO</option>
+                          <option value="AWS">Amazon AWS S3</option>
+                          <option value="Cloudflare">Cloudflare R2</option>
+                          <option value="DigitalOcean">DigitalOcean Spaces</option>
+                          <option value="Other">Khác (Other)</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Access Key ID:</label>
+                        <input
+                          type="text"
+                          required
+                          value={remoteParams.access_key_id || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, access_key_id: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Secret Access Key:</label>
+                        <input
+                          type="password"
+                          required
+                          value={remoteParams.secret_access_key || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, secret_access_key: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Endpoint URL (Bắt buộc cho R2/MinIO/Spaces):</label>
+                        <input
+                          type="text"
+                          placeholder="vd: https://<account_id>.r2.cloudflarestorage.com"
+                          value={remoteParams.endpoint || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, endpoint: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Region (Vùng - Nếu có):</label>
+                        <input
+                          type="text"
+                          placeholder="vd: us-east-1, auto"
+                          value={remoteParams.region || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, region: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* OneDrive fields */}
+                  {remoteType === 'onedrive' && (
+                    <div className="space-y-2 pt-2 border-t border-white/5">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Client ID:</label>
+                        <input
+                          type="text"
+                          value={remoteParams.client_id || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, client_id: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Client Secret:</label>
+                        <input
+                          type="password"
+                          value={remoteParams.client_secret || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, client_secret: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">OAuth Token JSON:</label>
+                        <textarea
+                          rows="3"
+                          placeholder='{"access_token":"...","refresh_token":"..."}'
+                          value={remoteParams.token || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, token: e.target.value })}
+                          className="input-glass w-full font-mono text-[10px]"
+                          style={{ padding: '6px', resize: 'vertical' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SFTP/FTP fields */}
+                  {(remoteType === 'sftp' || remoteType === 'ftp') && (
+                    <div className="space-y-2 pt-2 border-t border-white/5">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Host / IP Address:</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="vd: 123.45.67.89 hoặc ftp.domain.com"
+                          value={remoteParams.host || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, host: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Cổng (Port):</label>
+                        <input
+                          type="text"
+                          required
+                          value={remoteParams.port || (remoteType === 'sftp' ? '22' : '21')}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, port: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Tên đăng nhập (Username):</label>
+                        <input
+                          type="text"
+                          required
+                          value={remoteParams.user || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, user: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Mật khẩu (Password):</label>
+                        <input
+                          type="password"
+                          required
+                          value={remoteParams.pass || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, pass: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dropbox fields */}
+                  {remoteType === 'dropbox' && (
+                    <div className="space-y-2 pt-2 border-t border-white/5">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Client ID:</label>
+                        <input
+                          type="text"
+                          value={remoteParams.client_id || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, client_id: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Client Secret:</label>
+                        <input
+                          type="password"
+                          value={remoteParams.client_secret || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, client_secret: e.target.value })}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 font-medium text-xs">Token:</label>
+                        <textarea
+                          rows="2"
+                          placeholder="Nhập Dropbox Token"
+                          value={remoteParams.token || ''}
+                          onChange={(e) => setRemoteParams({ ...remoteParams, token: e.target.value })}
+                          className="input-glass w-full font-mono text-[10px]"
+                          style={{ padding: '6px', resize: 'vertical' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-gray-400 font-medium block">Nội dung cấu hình block `rclone.conf`:</label>
+                  <textarea
+                    required
+                    rows="8"
+                    placeholder={`[myremote]\ntype = drive\nclient_id = ...\nclient_secret = ...\ntoken = {"access_token":"..."}`}
+                    value={remoteRawConfig}
+                    onChange={(e) => setRemoteRawConfig(e.target.value)}
+                    className="input-glass w-full font-mono text-xs"
+                    style={{ padding: '8px', resize: 'vertical' }}
+                  />
+                  <p className="text-[10px] text-gray-400 leading-normal">Lưu ý: Dán trọn vẹn cả tiêu đề khối `[tên_remote]`. Khi dùng cấu hình Raw, bạn có thể thiết lập bất kỳ loại Remote nào mà Rclone hỗ trợ.</p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-white/5" style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowRcloneModal(false)}
+                  className="btn btn-secondary"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary flex items-center gap-2"
+                >
+                  <Save size={16} /> Lưu cấu hình
                 </button>
               </div>
             </form>

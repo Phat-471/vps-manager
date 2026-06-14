@@ -429,6 +429,317 @@ async function setupSSLAutoRenewCron(req, res) {
     }
 }
 
+async function checkSSLAutoRenewStatus(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const checkCmd = "test -f /etc/cron.d/certbot-renew-panel && echo 'EXISTS' || echo 'NOT_EXISTS'";
+        const result = await ssh.executeCommand(checkCmd);
+        const active = result.stdout.trim() === 'EXISTS';
+
+        res.json({
+            success: true,
+            active,
+            schedule: '0 0 * * *',
+            command: "certbot renew --post-hook 'systemctl reload nginx'"
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function testSSLAutoRenew(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const result = await ssh.executeCommand('certbot renew --dry-run');
+        res.json({
+            success: true,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            code: result.code
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function updateNginxConfigForSSL(ssh, domain, certPath, keyPath) {
+    const configPath = `/etc/nginx/sites-available/${domain}`;
+    const exists = await ssh.exists(configPath);
+    if (!exists) {
+        throw new Error(`Cấu hình Nginx cho tên miền ${domain} không tồn tại.`);
+    }
+
+    const configContent = await ssh.readFile(configPath);
+
+    let newConfig = configContent;
+    if (configContent.includes('listen 443 ssl')) {
+        // Cập nhật đường dẫn cert cũ
+        newConfig = configContent.replace(/ssl_certificate\s+[^;]+;/g, `ssl_certificate ${certPath};`);
+        newConfig = newConfig.replace(/ssl_certificate_key\s+[^;]+;/g, `ssl_certificate_key ${keyPath};`);
+    } else {
+        // Chuyển http thành https
+        const redirectBlock = `server {
+    listen 80;
+    server_name ${domain} *.${domain};
+    return 301 https://$host$request_uri;
+}
+
+`;
+        let updatedBlock = configContent.replace(/listen\s+80\s*;/g, `listen 443 ssl;
+    ssl_certificate ${certPath};
+    ssl_certificate_key ${keyPath};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;`);
+
+        newConfig = redirectBlock + updatedBlock;
+    }
+
+    await ssh.writeFile(configPath, newConfig);
+    const testResult = await ssh.executeCommand('nginx -t');
+    if (testResult.code !== 0) {
+        // Phục hồi lại cấu hình cũ nếu lỗi
+        await ssh.writeFile(configPath, configContent);
+        throw new Error(`Cấu hình Nginx lỗi: ${testResult.stderr}`);
+    }
+
+    await ssh.executeCommand('systemctl reload nginx');
+}
+
+async function installWildcardSSL(req, res) {
+    try {
+        const { vpsConfig, domain, email, cfEmail, cfKey, cfToken } = req.body;
+        const safeDomain = sanitizeAlphaNum(domain);
+        if (!safeDomain) {
+            return res.status(400).json({ success: false, error: 'Domain không hợp lệ' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        // Cài đặt certbot plugin cloudflare dns
+        await ssh.executeCommand('apt-get update && apt-get install -y certbot python3-certbot-dns-cloudflare');
+
+        const secretsDir = '/root/.secrets/certbot';
+        await ssh.executeCommand(`mkdir -p ${secretsDir}`);
+        
+        let iniContent = '';
+        if (cfToken) {
+            iniContent = `dns_cloudflare_api_token = ${cfToken.trim()}\n`;
+        } else {
+            iniContent = `dns_cloudflare_email = ${cfEmail.trim()}\ndns_cloudflare_api_key = ${cfKey.trim()}\n`;
+        }
+
+        const iniPath = `${secretsDir}/cloudflare.ini`;
+        await ssh.writeFile(iniPath, iniContent);
+        await ssh.executeCommand(`chmod 600 ${iniPath}`);
+
+        const safeEmail = escapeShellArg(email || `admin@${safeDomain}`);
+        const certbotCmd = `certbot certonly --dns-cloudflare --dns-cloudflare-credentials ${iniPath} -d "*.${safeDomain}" -d "${safeDomain}" --non-interactive --agree-tos -m ${safeEmail} --dns-cloudflare-propagation-seconds 10`;
+
+        const result = await ssh.executeCommand(certbotCmd);
+        if (result.code !== 0) {
+            throw new Error(`Certbot wildcard error: ${result.stdout}\n${result.stderr}`);
+        }
+
+        const certPath = `/etc/letsencrypt/live/${safeDomain}/fullchain.pem`;
+        const keyPath = `/etc/letsencrypt/live/${safeDomain}/privkey.pem`;
+        
+        await updateNginxConfigForSSL(ssh, safeDomain, certPath, keyPath);
+
+        res.json({
+            success: true,
+            message: `Cài đặt SSL Wildcard thành công cho ${safeDomain}`,
+            log: result.stdout
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function uploadCustomSSL(req, res) {
+    try {
+        const { vpsConfig, domain, certText, keyText } = req.body;
+        const safeDomain = sanitizeAlphaNum(domain);
+        if (!safeDomain) {
+            return res.status(400).json({ success: false, error: 'Domain không hợp lệ' });
+        }
+        if (!certText || !keyText) {
+            return res.status(400).json({ success: false, error: 'Thiếu nội dung Certificate hoặc Private Key' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const sslDir = '/etc/nginx/ssl';
+        await ssh.executeCommand(`mkdir -p ${sslDir}`);
+
+        const certPath = `${sslDir}/${safeDomain}.crt`;
+        const keyPath = `${sslDir}/${safeDomain}.key`;
+
+        await ssh.writeFile(certPath, certText.trim());
+        await ssh.writeFile(keyPath, keyText.trim());
+        await ssh.executeCommand(`chmod 600 ${keyPath}`);
+
+        await updateNginxConfigForSSL(ssh, safeDomain, certPath, keyPath);
+
+        res.json({
+            success: true,
+            message: `Cài đặt Custom SSL thành công cho ${safeDomain}`
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * Phase 4: Nginx Config Error Scanner
+ * Runs `nginx -t` on the remote VPS and parses the structured error output
+ */
+async function scanNginxConfig(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        // Run nginx -t and capture both stdout + stderr
+        const testResult = await ssh.executeCommand('nginx -t 2>&1; echo "NGINX_TEST_EXIT:$?"');
+        const raw = testResult.stdout + testResult.stderr;
+
+        // Also gather list of all config files
+        const filesResult = await ssh.executeCommand(
+            'find /etc/nginx -name "*.conf" -not -path "*/snippets/*" 2>/dev/null | sort; ' +
+            'ls /etc/nginx/sites-enabled/ 2>/dev/null | sed "s|^|/etc/nginx/sites-enabled/|"'
+        );
+        const allFiles = filesResult.stdout.trim().split('\n').filter(Boolean);
+
+        // Check if nginx test passed
+        const exitMatch = raw.match(/NGINX_TEST_EXIT:(\d+)/);
+        const exitCode = exitMatch ? parseInt(exitMatch[1]) : 1;
+        const passed = exitCode === 0;
+
+        // Parse error lines: "nginx: [emerg] message in /path/to/file.conf:42"
+        const errors = [];
+        const lines = raw.split('\n');
+        for (const line of lines) {
+            if (!line.includes('[emerg]') && !line.includes('[warn]') && !line.includes('[crit]')) continue;
+            const severity = line.includes('[emerg]') || line.includes('[crit]') ? 'error' : 'warning';
+            // Extract file:line pattern
+            const fileMatch = line.match(/in\s+(\/[^:]+):(\d+)/);
+            const msgMatch = line.match(/\[(emerg|warn|crit)\]\s+(.+?)(?:\s+in\s+\/|$)/);
+            errors.push({
+                severity,
+                message: msgMatch ? msgMatch[2].trim() : line.trim(),
+                file: fileMatch ? fileMatch[1] : null,
+                line: fileMatch ? parseInt(fileMatch[2]) : null,
+                raw: line.trim()
+            });
+        }
+
+        // For each error file, read nearby context lines
+        const errorDetails = [];
+        const readFiles = new Set(errors.filter(e => e.file).map(e => e.file));
+        for (const filePath of readFiles) {
+            const safeFile = filePath.replace(/[^a-zA-Z0-9/_.\-]/g, '');
+            const contentResult = await ssh.executeCommand(`cat -n ${safeFile} 2>/dev/null || echo "FILE_NOT_READABLE"`);
+            if (!contentResult.stdout.includes('FILE_NOT_READABLE')) {
+                errorDetails.push({ file: safeFile, content: contentResult.stdout });
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                passed,
+                errors,
+                errorDetails,
+                allFiles,
+                rawOutput: raw.replace(/NGINX_TEST_EXIT:\d+\n?/, '').trim()
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * Phase 4: Auto-fix common Nginx config issues
+ * Supports: missing semicolons, wrong PHP socket path
+ */
+async function fixNginxIssue(req, res) {
+    try {
+        const { vpsConfig, fixType, filePath, lineNumber } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const safeFile = (filePath || '').replace(/[^a-zA-Z0-9/_.\-]/g, '');
+        if (!safeFile) {
+            return res.status(400).json({ success: false, error: 'Đường dẫn file không hợp lệ' });
+        }
+
+        let fixScript = '';
+
+        if (fixType === 'backup_and_reload') {
+            // Simply backup + test + reload
+            fixScript = `
+                cp ${safeFile} ${safeFile}.bak.$(date +%s)
+                nginx -t 2>&1 && systemctl reload nginx
+                echo "DONE"
+            `;
+        } else if (fixType === 'add_semicolon') {
+            // Add missing semicolons at end of directives on problematic line
+            const safeLine = parseInt(lineNumber) || 1;
+            fixScript = `
+                cp ${safeFile} ${safeFile}.bak.$(date +%s)
+                sed -i '${safeLine}s/\\([^;{]\\)$/\\1;/' ${safeFile}
+                nginx -t 2>&1 && echo "RELOAD_OK" || echo "FIX_FAILED"
+            `;
+        } else if (fixType === 'fix_php_socket') {
+            // Detect actual PHP-FPM socket path and update config
+            fixScript = `
+                # Find actual php-fpm socket
+                SOCKET=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | head -1)
+                if [ -z "$SOCKET" ]; then
+                    SOCKET=$(find /var/run/php/ -name "php*-fpm.sock" 2>/dev/null | head -1)
+                fi
+                if [ -z "$SOCKET" ]; then
+                    echo "SOCKET_NOT_FOUND"
+                    exit 1
+                fi
+                cp ${safeFile} ${safeFile}.bak.$(date +%s)
+                # Replace any fastcgi_pass unix:/run/php/... path
+                sed -i "s|fastcgi_pass unix:/[^;]*;|fastcgi_pass unix:$SOCKET;|g" ${safeFile}
+                nginx -t 2>&1 && echo "RELOAD_OK" || echo "FIX_FAILED"
+            `;
+        } else if (fixType === 'remove_duplicate_default') {
+            // Remove duplicate default_server markers
+            fixScript = `
+                cp ${safeFile} ${safeFile}.bak.$(date +%s)
+                # Remove extra 'default_server' occurrences leaving only first
+                awk '/default_server/ && found++ > 0 {sub(/ default_server/, "")} 1' ${safeFile} > /tmp/nginx_fix_tmp && mv /tmp/nginx_fix_tmp ${safeFile}
+                nginx -t 2>&1 && echo "RELOAD_OK" || echo "FIX_FAILED"
+            `;
+        } else if (fixType === 'reload_only') {
+            fixScript = `nginx -t 2>&1 && systemctl reload nginx && echo "RELOAD_OK" || echo "RELOAD_FAILED"`;
+        } else {
+            return res.status(400).json({ success: false, error: 'Loại fix không được hỗ trợ' });
+        }
+
+        const result = await ssh.executeCommand(fixScript);
+        const output = (result.stdout + result.stderr).trim();
+        const success = output.includes('RELOAD_OK') || (fixType === 'reload_only' && !output.includes('RELOAD_FAILED'));
+
+        res.json({
+            success: true,
+            data: {
+                applied: success,
+                output
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listSites,
     addSite,
@@ -443,5 +754,11 @@ module.exports = {
     saveHosts,
     listSSLCertificates,
     renewAllSSL,
-    setupSSLAutoRenewCron
+    setupSSLAutoRenewCron,
+    checkSSLAutoRenewStatus,
+    testSSLAutoRenew,
+    installWildcardSSL,
+    uploadCustomSSL,
+    scanNginxConfig,
+    fixNginxIssue
 };

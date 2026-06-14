@@ -58,6 +58,7 @@ async function getTrafficStats(req, res) {
 
         // Danh sách định nghĩa bot để nhận diện nhanh
         const botKeywords = ['bot', 'crawler', 'spider', 'ahrefs', 'semrush', 'python', 'curl', 'wget', 'scan'];
+        const ipDetailsMap = {};
 
         for (const line of lines) {
             const trimmed = line.trim();
@@ -105,16 +106,19 @@ async function getTrafficStats(req, res) {
             const uaLower = ua.toLowerCase();
             const matchedBot = botKeywords.find(keyword => uaLower.includes(keyword));
             
+            if (!ipDetailsMap[ip]) {
+                ipDetailsMap[ip] = { isBot: false };
+            }
+
             if (matchedBot) {
                 uaKey = `Bot: ${matchedBot.charAt(0).toUpperCase() + matchedBot.slice(1)}`;
+                ipDetailsMap[ip].isBot = true;
             } else if (uaLower.includes('mobile') || uaLower.includes('android') || uaLower.includes('iphone')) {
                 uaKey = 'Mobile Device';
             }
             userAgentsMap[uaKey] = (userAgentsMap[uaKey] || 0) + 1;
 
             // 6. Thống kê theo Giờ
-            // Format timeStr: 13/Jun/2026:16:48:35 +0700
-            // Ký tự phân tách ':' thứ nhất sẽ đứng ngay trước giờ
             const hourParts = timeStr.split(':');
             if (hourParts.length >= 2) {
                 const hour = parseInt(hourParts[1]);
@@ -131,10 +135,56 @@ async function getTrafficStats(req, res) {
             .slice(0, 10);
 
         // Sắp xếp và lấy Top 10 IP
-        const topIPs = Object.entries(ipsMap)
+        const topIPsRaw = Object.entries(ipsMap)
             .map(([ip, count]) => ({ ip, count }))
             .sort((a, b) => b.count - a.count)
             .slice(0, 10);
+
+        // Truy vấn GeoIP cho Top 10 IP
+        const ipList = topIPsRaw.map(item => item.ip);
+        let geoData = [];
+        try {
+            if (ipList.length > 0) {
+                const response = await fetch('http://ip-api.com/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(ipList.map(ip => ({ query: ip })))
+                });
+                if (response.ok) {
+                    geoData = await response.json();
+                }
+            }
+        } catch (err) {
+            console.error('GeoIP lookup failed:', err.message);
+        }
+
+        const geoMap = {};
+        if (Array.isArray(geoData)) {
+            geoData.forEach(item => {
+                if (item && item.status === 'success') {
+                    geoMap[item.query] = item;
+                }
+            });
+        }
+
+        const topIPs = topIPsRaw.map(item => {
+            const ip = item.ip;
+            const geo = geoMap[ip] || {};
+            const details = ipDetailsMap[ip] || { isBot: false };
+            const orgLower = (geo.org || geo.isp || '').toLowerCase();
+            const isDatacenter = orgLower.includes('hosting') || orgLower.includes('datacenter') || orgLower.includes('server') || orgLower.includes('amazon') || orgLower.includes('google') || orgLower.includes('microsoft') || orgLower.includes('ovh') || orgLower.includes('digitalocean') || orgLower.includes('hetzner') || orgLower.includes('cloudflare');
+            const isBot = details.isBot || isDatacenter;
+
+            return {
+                ip,
+                count: item.count,
+                country: geo.country || 'N/A',
+                countryCode: geo.countryCode || '',
+                org: geo.org || geo.isp || 'N/A',
+                isBot,
+                type: isBot ? 'Bot/Datacenter' : 'Người dùng'
+            };
+        });
 
         // Sắp xếp và lấy User Agent
         const topUserAgents = Object.entries(userAgentsMap)

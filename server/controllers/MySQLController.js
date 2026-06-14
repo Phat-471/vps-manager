@@ -181,6 +181,76 @@ async function repairSystem(req, res) {
     }
 }
 
+async function grantPrivileges(req, res) {
+    try {
+        const { vpsConfig, user, host, database, privileges, action } = req.body;
+        const safeUser = sanitizeAlphaNum(user);
+        const safeHost = (host || '%').replace(/[^a-zA-Z0-9._%]/g, '');
+        const safeDb = database === '*' ? '*' : sanitizeAlphaNum(database);
+        if (!safeUser || !safeDb) {
+            return res.status(400).json({ success: false, error: 'Tên user hoặc database không hợp lệ' });
+        }
+        const privList = Array.isArray(privileges) && privileges.length > 0
+            ? privileges.join(', ')
+            : 'ALL PRIVILEGES';
+        const dbTarget = safeDb === '*' ? `*.*` : `\`${safeDb}\`.*`;
+
+        let sql;
+        if (action === 'revoke') {
+            sql = `REVOKE ALL PRIVILEGES ON ${dbTarget} FROM '${safeUser}'@'${safeHost}'; FLUSH PRIVILEGES;`;
+        } else {
+            sql = `GRANT ${privList} ON ${dbTarget} TO '${safeUser}'@'${safeHost}'; FLUSH PRIVILEGES;`;
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        await ssh.executeCommand(`mysql -e ${escapeShellArg(sql)}`);
+        res.json({ success: true, message: action === 'revoke' ? 'Đã thu hồi quyền thành công' : 'Đã cấp quyền thành công' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function changePassword(req, res) {
+    try {
+        const { vpsConfig, user, host, newPassword } = req.body;
+        const safeUser = sanitizeAlphaNum(user);
+        const safeHost = (host || '%').replace(/[^a-zA-Z0-9._%]/g, '');
+        if (!safeUser) {
+            return res.status(400).json({ success: false, error: 'Username không hợp lệ' });
+        }
+        if (!newPassword || newPassword.length < 6) {
+            return res.status(400).json({ success: false, error: 'Mật khẩu phải có ít nhất 6 ký tự' });
+        }
+        if (['root', 'mysql.session', 'mysql.sys', 'mysql.infoschema', 'debian-sys-maint'].includes(safeUser)) {
+            return res.status(400).json({ success: false, error: 'Không thể đổi mật khẩu tài khoản hệ thống' });
+        }
+        const escapedPass = String(newPassword).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const sql = `ALTER USER '${safeUser}'@'${safeHost}' IDENTIFIED BY '${escapedPass}'; FLUSH PRIVILEGES;`;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        await ssh.executeCommand(`mysql -e ${escapeShellArg(sql)}`);
+        res.json({ success: true, message: 'Đã đổi mật khẩu thành công' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function getUserPrivileges(req, res) {
+    try {
+        const { vpsConfig, user, host } = req.body;
+        const safeUser = sanitizeAlphaNum(user);
+        const safeHost = (host || '%').replace(/[^a-zA-Z0-9._%]/g, '');
+        if (!safeUser) {
+            return res.status(400).json({ success: false, error: 'Username không hợp lệ' });
+        }
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const result = await ssh.executeCommand(`mysql -e ${escapeShellArg(`SHOW GRANTS FOR '${safeUser}'@'${safeHost}';`)} -sN 2>&1`);
+        const grants = result.stdout.trim().split('\n').filter(Boolean);
+        res.json({ success: true, data: grants });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listDatabases,
     listUsers,
@@ -191,5 +261,8 @@ module.exports = {
     getTables,
     exportDatabase,
     importDatabase,
-    repairSystem
+    repairSystem,
+    grantPrivileges,
+    changePassword,
+    getUserPrivileges
 };

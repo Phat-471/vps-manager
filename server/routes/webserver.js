@@ -20,5 +20,13 @@ router.post('/save-hosts', WebServerController.saveHosts);
 router.post('/ssl/list', WebServerController.listSSLCertificates);
 router.post('/ssl/renew-all', WebServerController.renewAllSSL);
 router.post('/ssl/setup-cron', WebServerController.setupSSLAutoRenewCron);
+router.post('/ssl/check-cron', WebServerController.checkSSLAutoRenewStatus);
+router.post('/ssl/test-dryrun', WebServerController.testSSLAutoRenew);
+router.post('/ssl/wildcard', WebServerController.installWildcardSSL);
+router.post('/ssl/custom', WebServerController.uploadCustomSSL);
+
+// Nginx Config Scanner & Auto-Fix (Phase 4)
+router.post('/nginx/scan', WebServerController.scanNginxConfig);
+router.post('/nginx/fix', WebServerController.fixNginxIssue);
 
 module.exports = router;

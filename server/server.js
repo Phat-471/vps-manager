@@ -70,6 +70,7 @@ const alertsRoutes = require('./routes/alerts');
 const phpRoutes = require('./routes/php');
 const nodeRoutes = require('./routes/node');
 const mailRoutes = require('./routes/mail');
+const installerRoutes = require('./routes/installer');
 
 // API Routes (Tuyến đường mở cho Auth)
 app.use('/api/auth', authRoutes);
@@ -110,6 +111,7 @@ app.use('/api/alerts', alertsRoutes);
 app.use('/api/php', phpRoutes);
 app.use('/api/node', nodeRoutes);
 app.use('/api/mail', mailRoutes);
+app.use('/api/installer', installerRoutes);
 
 // Socket.IO for real-time features
 io.on('connection', (socket) => {
@@ -119,6 +121,17 @@ io.on('connection', (socket) => {
   socket.on('terminal:create', (vpsConfig) => {
     const terminalHandler = require('./handlers/terminal');
     terminalHandler.create(socket, vpsConfig);
+  });
+
+  // Task execution session
+  socket.on('task:run', (payload) => {
+    const taskRunner = require('./handlers/taskRunner');
+    taskRunner.start(socket, payload);
+  });
+
+  socket.on('task:stop', () => {
+    const taskRunner = require('./handlers/taskRunner');
+    taskRunner.stop(socket);
   });
 
   // System monitoring
@@ -137,6 +150,8 @@ io.on('connection', (socket) => {
     // Clean up resources
     const monitorHandler = require('./handlers/monitor');
     monitorHandler.stop(socket);
+    const taskRunner = require('./handlers/taskRunner');
+    taskRunner.stop(socket);
   });
 });
 

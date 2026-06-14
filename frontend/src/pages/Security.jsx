@@ -12,7 +12,8 @@ import {
   Key, 
   Globe, 
   Activity, 
-  Lock 
+  Lock,
+  X
 } from 'lucide-react';
 
 export default function Security() {
@@ -26,6 +27,8 @@ export default function Security() {
   const [fail2banActive, setFail2banActive] = useState(false);
   const [portInput, setPortInput] = useState('');
   const [protoInput, setProtoInput] = useState('tcp');
+  const [actionInput, setActionInput] = useState('allow');
+  const [fromIpInput, setFromIpInput] = useState('any');
 
   // Tab 2: Listening Ports State
   const [listeningPorts, setListeningPorts] = useState([]);
@@ -34,6 +37,8 @@ export default function Security() {
   // Tab 3: SSH Port State
   const [sshPortInput, setSshPortInput] = useState('');
   const [sshLoading, setSshLoading] = useState(false);
+  const [disablingPassword, setDisablingPassword] = useState(false);
+  const [loadingFail2ban, setLoadingFail2ban] = useState(false);
 
   // Tab 4: SSL Panel State
   const [sslDomain, setSslDomain] = useState('');
@@ -46,6 +51,16 @@ export default function Security() {
   const [blacklistLoading, setBlacklistLoading] = useState(false);
   const [ipToBlock, setIpToBlock] = useState('');
 
+  // Tab 6: Firewall Zones State
+  const [zones, setZones] = useState([]);
+  const [zonesLoading, setZonesLoading] = useState(false);
+  const [showZoneModal, setShowZoneModal] = useState(false);
+  const [editingZone, setEditingZone] = useState(null);
+  const [zoneName, setZoneName] = useState('');
+  const [zoneIps, setZoneIps] = useState('');
+  const [zonePorts, setZonePorts] = useState('');
+  const [zoneDescription, setZoneDescription] = useState('');
+
   useEffect(() => {
     if (activeTab === 'firewall') {
       fetchSecurityStatus();
@@ -53,8 +68,105 @@ export default function Security() {
       fetchListeningPorts();
     } else if (activeTab === 'blacklist') {
       fetchBlacklistIPs();
+    } else if (activeTab === 'zones') {
+      fetchZones();
     }
   }, [activeTab]);
+
+  const fetchZones = async () => {
+    setZonesLoading(true);
+    try {
+      const res = await apiCall('/api/security/zones/list', 'POST');
+      if (res.success) {
+        setZones(res.data || []);
+      }
+    } catch (err) {
+      showToast('Lỗi tải danh sách vùng bảo mật: ' + err.message, 'error');
+    } finally {
+      setZonesLoading(false);
+    }
+  };
+
+  const handleOpenAddZone = () => {
+    setEditingZone(null);
+    setZoneName('');
+    setZoneIps('');
+    setZonePorts('');
+    setZoneDescription('');
+    setShowZoneModal(true);
+  };
+
+  const handleOpenEditZone = (zone) => {
+    setEditingZone(zone);
+    setZoneName(zone.name);
+    setZoneIps(zone.ips.join(', '));
+    setZonePorts(zone.ports.map(p => `${p.port}/${p.proto || 'any'}`).join(', '));
+    setZoneDescription(zone.description);
+    setShowZoneModal(true);
+  };
+
+  const handleSaveZone = async (e) => {
+    e.preventDefault();
+    if (!zoneName.trim()) return;
+
+    const ips = zoneIps.split(',').map(ip => ip.trim()).filter(Boolean);
+    const ports = zonePorts.split(',').map(p => {
+      const parts = p.trim().split('/');
+      const port = parts[0].trim();
+      const proto = parts[1] ? parts[1].trim().toLowerCase() : 'any';
+      return { port, proto };
+    }).filter(p => p.port);
+
+    try {
+      const zonePayload = {
+        id: editingZone ? editingZone.id : undefined,
+        name: zoneName.trim(),
+        ips,
+        ports,
+        description: zoneDescription.trim()
+      };
+
+      const res = await apiCall('/api/security/zones/save', 'POST', { zone: zonePayload });
+      if (res.success) {
+        showToast(res.message, 'success');
+        setZones(res.data || []);
+        setShowZoneModal(false);
+      }
+    } catch (err) {
+      showToast('Lỗi lưu vùng bảo mật: ' + err.message, 'error');
+    }
+  };
+
+  const handleDeleteZone = async (id) => {
+    if (!window.confirm('Bạn có chắc muốn xóa vùng bảo mật này không?')) return;
+    try {
+      const res = await apiCall('/api/security/zones/delete', 'POST', { id });
+      if (res.success) {
+        showToast(res.message, 'success');
+        setZones(res.data || []);
+      }
+    } catch (err) {
+      showToast('Lỗi xóa vùng bảo mật: ' + err.message, 'error');
+    }
+  };
+
+  const handleApplyZones = async () => {
+    if (!window.confirm('Cảnh báo: Áp dụng các vùng bảo mật sẽ dọn dẹp các quy tắc allow chung của các cổng được chỉ định để giới hạn truy cập. Bạn hãy đảm bảo IP hiện tại của mình đã được cho phép truy cập SSH trong các vùng. Tiếp tục?')) return;
+    setLoading(true);
+    try {
+      const res = await apiCall('/api/security/zones/apply', 'POST');
+      if (res.success) {
+        showToast(res.message, 'success');
+        if (activeTab === 'firewall') {
+          fetchSecurityStatus();
+        }
+      }
+    } catch (err) {
+      showToast('Lỗi áp dụng cấu hình: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchSecurityStatus = async () => {
     setLoading(true);
@@ -91,10 +203,14 @@ export default function Security() {
     try {
       await apiCall('/api/security/ufw/add', 'POST', {
         port: portInput,
-        proto: protoInput
+        proto: protoInput,
+        action: actionInput,
+        fromIP: fromIpInput
       });
-      showToast(`Đã tạo luật mở port ${portInput}/${protoInput}`, 'success');
+      showToast(`Đã thêm quy tắc UFW thành công`, 'success');
       setPortInput('');
+      setFromIpInput('any');
+      setActionInput('allow');
       fetchSecurityStatus();
     } catch (err) {
       console.error(err);
@@ -156,6 +272,46 @@ export default function Security() {
       console.error(err);
     } finally {
       setSshLoading(false);
+    }
+  };
+
+  const handleInstallFail2Ban = async () => {
+    if (!window.confirm('Bạn có chắc chắn muốn cài đặt và kích hoạt Fail2Ban trên VPS không?')) return;
+    setLoadingFail2ban(true);
+    showToast('Đang chạy tiến trình cài đặt Fail2Ban...', 'info');
+    try {
+      const res = await apiCall('/api/security/fail2ban/install', 'POST');
+      if (res.success) {
+        showToast(res.message, 'success');
+        fetchSecurityStatus();
+      }
+    } catch (err) {
+      showToast('Cài đặt Fail2Ban thất bại: ' + err.message, 'error');
+    } finally {
+      setLoadingFail2ban(false);
+    }
+  };
+
+  const handleDisablePasswordLogin = async () => {
+    const confirmMsg = `CẢNH BÁO NGUY HIỂM:\n\n` +
+      `1. Thao tác này sẽ tắt tính năng đăng nhập SSH bằng mật khẩu thông thường.\n` +
+      `2. Bạn CHỈ có thể đăng nhập bằng SSH Key sau khi tắt mật khẩu.\n` +
+      `3. Hãy chắc chắn bạn đã cấu hình SSH Key hợp lệ và đăng nhập thử thành công trước khi thực hiện. Nếu không bạn sẽ bị KHÓA KHỎI VPS.\n\n` +
+      `Bạn chắc chắn đã sẵn sàng và muốn vô hiệu hóa mật khẩu?`;
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    setDisablingPassword(true);
+    showToast('Đang tiến hành vô hiệu hóa đăng nhập bằng mật khẩu...', 'info');
+    try {
+      const res = await apiCall('/api/security/ssh/password-disable', 'POST');
+      if (res.success) {
+        showToast(res.message, 'success');
+      }
+    } catch (err) {
+      showToast('Thao tác thất bại: ' + err.message, 'error');
+    } finally {
+      setDisablingPassword(false);
     }
   };
 
@@ -288,6 +444,13 @@ export default function Security() {
           <ShieldAlert size={16} />
           Danh sách đen IP (Blacklist)
         </button>
+        <button 
+          onClick={() => setActiveTab('zones')}
+          className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === 'zones' ? 'active bg-indigo-500/20 text-indigo-300' : 'text-gray-400 hover:text-white'}`}
+        >
+          <Shield size={16} className="text-yellow-400" />
+          Vùng bảo mật (Zones)
+        </button>
       </div>
 
       {/* TAB 1: Firewall UFW & Fail2Ban */}
@@ -332,10 +495,22 @@ export default function Security() {
                 </div>
                 <p className="text-sm text-gray-400 leading-relaxed">Tự động phát hiện và chặn các địa chỉ IP thực hiện brute-force dò tìm mật khẩu qua cổng SSH.</p>
               </div>
-              <div className="db-warning-card" style={{ marginTop: '16px', padding: '8px 12px' }}>
-                <AlertTriangle size={16} className="db-warning-icon text-yellow-400 shrink-0" />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}> Fail2Ban giám sát và chặn tự động IP xấu trong nền hệ thống.</span>
-              </div>
+              
+              {!fail2banActive ? (
+                <button
+                  onClick={handleInstallFail2Ban}
+                  disabled={loadingFail2ban}
+                  className="btn btn-success btn-block"
+                  style={{ marginTop: '16px', padding: '10px' }}
+                >
+                  {loadingFail2ban ? 'Đang cài đặt...' : 'Cài đặt & Kích hoạt Fail2Ban'}
+                </button>
+              ) : (
+                <div className="db-warning-card" style={{ marginTop: '16px', padding: '8px 12px' }}>
+                  <Shield size={16} className="db-warning-icon text-green-400 shrink-0" />
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}> Fail2Ban đang hoạt động ổn định và tự động bảo vệ hệ thống của bạn.</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -362,27 +537,34 @@ export default function Security() {
                         </tr>
                       </thead>
                       <tbody>
-                        {ufwRules.map((rule) => (
-                          <tr key={rule.index}>
-                            <td className="font-mono text-xs text-gray-400">#{rule.index}</td>
-                            <td className="font-semibold text-indigo-300">{rule.to}</td>
-                            <td>
-                              <span className={`status-badge ${rule.action === 'ALLOW' ? 'success' : 'danger'}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
-                                {rule.action}
-                              </span>
-                            </td>
-                            <td className="text-gray-300">{rule.from}</td>
-                            <td style={{ textAlign: 'center' }}>
-                              <button
-                                onClick={() => handleDeleteRule(rule.index)}
-                                className="btn btn-glass text-red-400"
-                                style={{ padding: '6px' }}
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {ufwRules.map((rule) => {
+                          const actionUpper = rule.action.toUpperCase();
+                          let badgeClass = 'danger';
+                          if (actionUpper === 'ALLOW') badgeClass = 'success';
+                          else if (actionUpper === 'LIMIT') badgeClass = 'warning';
+                          
+                          return (
+                            <tr key={rule.index}>
+                              <td className="font-mono text-xs text-gray-400">#{rule.index}</td>
+                              <td className="font-semibold text-indigo-300">{rule.to}</td>
+                              <td>
+                                <span className={`status-badge ${badgeClass}`} style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                  {rule.action}
+                                </span>
+                              </td>
+                              <td className="text-gray-300 font-mono text-xs">{rule.from}</td>
+                              <td style={{ textAlign: 'center' }}>
+                                <button
+                                  onClick={() => handleDeleteRule(rule.index)}
+                                  className="btn btn-glass text-red-400"
+                                  style={{ padding: '6px' }}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -393,15 +575,29 @@ export default function Security() {
               <div className="db-layout-sidebar card-glass p-6 rounded-xl space-y-4">
                 <h3 className="font-semibold text-lg flex items-center gap-2">
                   <Plus size={18} className="text-green-400" />
-                  Mở cổng Tường lửa
+                  Thêm luật Tường lửa
                 </h3>
                 <form onSubmit={handleAddRule} className="space-y-4">
                   <div className="form-group">
-                    <label>Cổng cần mở (Port)</label>
+                    <label>Hành động (Action)</label>
+                    <select
+                      value={actionInput}
+                      onChange={(e) => setActionInput(e.target.value)}
+                      className="input-glass"
+                    >
+                      <option value="allow">ALLOW (Cho phép)</option>
+                      <option value="deny">DENY (Chặn cổng)</option>
+                      <option value="limit">LIMIT (Giới hạn - chống Brute force)</option>
+                      <option value="reject">REJECT (Từ chối kết nối)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Cổng dịch vụ (Port)</label>
                     <input
                       type="text"
                       required
-                      placeholder="Ví dụ: 80, 443, 3000-3010"
+                      placeholder="Ví dụ: 80, 3306, 3000:3010 hoặc any"
                       value={portInput}
                       onChange={(e) => setPortInput(e.target.value)}
                       className="input-glass"
@@ -409,7 +605,7 @@ export default function Security() {
                   </div>
 
                   <div className="form-group">
-                    <label>Giao thức</label>
+                    <label>Giao thức (Protocol)</label>
                     <select
                       value={protoInput}
                       onChange={(e) => setProtoInput(e.target.value)}
@@ -417,8 +613,21 @@ export default function Security() {
                     >
                       <option value="tcp">TCP</option>
                       <option value="udp">UDP</option>
-                      <option value="any">Bất kỳ (Both TCP/UDP)</option>
+                      <option value="any">Bất kỳ (TCP & UDP)</option>
                     </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>IP / Subnet nguồn (Source IP)</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Mặc định: any (Tất cả mọi IP)"
+                      value={fromIpInput}
+                      onChange={(e) => setFromIpInput(e.target.value)}
+                      className="input-glass font-mono text-xs"
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">Ví dụ: `any` (mọi IP) hoặc giới hạn chỉ IP `1.2.3.4` hoặc dải mạng `192.168.1.0/24` được phép truy cập.</p>
                   </div>
 
                   <button
@@ -427,7 +636,7 @@ export default function Security() {
                     style={{ padding: '10px' }}
                   >
                     <Plus size={14} />
-                    Áp dụng quy tắc mới
+                    Áp dụng luật mới
                   </button>
                 </form>
               </div>
@@ -495,33 +704,56 @@ export default function Security() {
       {/* TAB 3: SSH Port Changer */}
       {activeTab === 'ssh' && (
         <div className="grid-2">
-          {/* SSH Changer Settings */}
-          <div className="card-glass p-6 rounded-xl space-y-4">
-            <h3 className="font-semibold text-lg flex items-center gap-2">
-              <Key size={18} className="text-indigo-400" />
-              Đổi cổng SSH đăng nhập máy chủ
-            </h3>
-            <p className="text-sm text-gray-400 leading-relaxed">
-              Mặc định cổng đăng nhập SSH là <code className="bg-white/5 px-1 py-0.5 rounded text-indigo-300">22</code>. Việc đổi sang một cổng ngẫu nhiên (ví dụ <code className="bg-white/5 px-1 py-0.5 rounded text-indigo-300">2222</code>, <code className="bg-white/5 px-1 py-0.5 rounded text-indigo-300">8822</code>) sẽ chặn đứng 99% các đợt tấn công dò quét mật khẩu từ bots mạng.
-            </p>
-            <form onSubmit={handleChangeSSHPort} className="space-y-4" style={{ marginTop: '20px' }}>
-              <div className="form-group">
-                <label>Cổng SSH mới</label>
-                <input
-                  type="number"
-                  required
-                  placeholder="Nhập cổng mong muốn (ví dụ: 2222)"
-                  value={sshPortInput}
-                  onChange={(e) => setSshPortInput(e.target.value)}
-                  className="input-glass"
-                  min="1"
-                  max="65535"
-                />
+          <div className="space-y-6">
+            {/* SSH Changer Settings */}
+            <div className="card-glass p-6 rounded-xl space-y-4">
+              <h3 className="font-semibold text-lg flex items-center gap-2">
+                <Key size={18} className="text-indigo-400" />
+                Đổi cổng SSH đăng nhập máy chủ
+              </h3>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Mặc định cổng đăng nhập SSH là <code className="bg-white/5 px-1 py-0.5 rounded text-indigo-300">22</code>. Việc đổi sang một cổng ngẫu nhiên (ví dụ <code className="bg-white/5 px-1 py-0.5 rounded text-indigo-300">2222</code>, <code className="bg-white/5 px-1 py-0.5 rounded text-indigo-300">8822</code>) sẽ chặn đứng 99% các đợt tấn công dò quét mật khẩu từ bots mạng.
+              </p>
+              <form onSubmit={handleChangeSSHPort} className="space-y-4" style={{ marginTop: '20px' }}>
+                <div className="form-group">
+                  <label>Cổng SSH mới</label>
+                  <input
+                    type="number"
+                    required
+                    placeholder="Nhập cổng mong muốn (ví dụ: 2222)"
+                    value={sshPortInput}
+                    onChange={(e) => setSshPortInput(e.target.value)}
+                    className="input-glass"
+                    min="1"
+                    max="65535"
+                  />
+                </div>
+                <button type="submit" disabled={sshLoading} className="btn btn-primary btn-block" style={{ padding: '10px' }}>
+                  {sshLoading ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Áp dụng và Đổi Cổng SSH'}
+                </button>
+              </form>
+            </div>
+
+            {/* SSH Password Login Hardening */}
+            <div className="card-glass p-6 rounded-xl space-y-4">
+              <h3 className="font-semibold text-lg flex items-center gap-2 text-yellow-400">
+                <Lock size={18} />
+                Vô hiệu hóa Đăng nhập bằng Mật khẩu
+              </h3>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                Tắt tính năng xác thực bằng mật khẩu để ngăn chặn hoàn toàn các cuộc tấn công Brute-force. Bạn **chỉ** có thể kết nối vào máy chủ sử dụng **SSH Keys** (Khóa công khai) đã cài trước đó.
+              </p>
+              <div className="pt-2">
+                <button
+                  onClick={handleDisablePasswordLogin}
+                  disabled={disablingPassword}
+                  className="btn btn-warning btn-block flex items-center justify-center gap-2"
+                  style={{ padding: '10px' }}
+                >
+                  {disablingPassword ? 'Đang áp dụng...' : 'Vô hiệu hóa Mật khẩu SSH'}
+                </button>
               </div>
-              <button type="submit" disabled={sshLoading} className="btn btn-primary btn-block" style={{ padding: '10px' }}>
-                {sshLoading ? <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Áp dụng và Đổi Cổng SSH'}
-              </button>
-            </form>
+            </div>
           </div>
 
           {/* Warnings & Help */}
@@ -718,6 +950,153 @@ export default function Security() {
                 <Power size={14} />
                 Áp dụng Chặn IP
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 6: Firewall Security Zones */}
+      {activeTab === 'zones' && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h2 className="text-lg font-bold text-gray-200">Phân vùng bảo mật Firewall (Security Zones)</h2>
+              <p className="text-xs text-gray-400">Định nghĩa các vùng truy cập an toàn (vd: nhóm IP của dev được kết nối SSH, nhóm IP của webserver được kết nối MySQL).</p>
+            </div>
+            <div className="flex gap-2" style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={handleApplyZones} className="btn btn-glass text-yellow-400 hover:bg-yellow-400/10">
+                <RefreshCw size={14} className="animate-pulse" /> Áp dụng cấu hình
+              </button>
+              <button onClick={handleOpenAddZone} className="btn btn-primary">
+                <Plus size={14} /> Thêm vùng mới
+              </button>
+            </div>
+          </div>
+
+          {zonesLoading ? (
+            <div className="text-center py-12 text-gray-400">Đang quét danh sách vùng bảo mật trên VPS...</div>
+          ) : zones.length === 0 ? (
+            <div className="card-glass p-12 text-center text-gray-400 rounded-xl">
+              Chưa có vùng bảo mật nào được cấu hình. Nhấp "Thêm vùng mới" để bắt đầu.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '24px' }}>
+              {zones.map(zone => (
+                <div key={zone.id} className="card-glass p-5 rounded-xl space-y-4 border border-white/5 relative flex flex-col justify-between" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-start" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <h3 className="font-semibold text-gray-200 text-sm flex items-center gap-1.5" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Shield size={16} className="text-yellow-400" />
+                          {zone.name}
+                        </h3>
+                        <p className="text-xs text-gray-400 font-normal">{zone.description || 'Không có mô tả'}</p>
+                      </div>
+                      <div className="flex gap-1" style={{ display: 'flex', gap: '4px' }}>
+                        <button onClick={() => handleOpenEditZone(zone)} className="btn btn-glass btn-xs text-blue-300" style={{ padding: '2px 6px', fontSize: '11px' }}>Sửa</button>
+                        <button onClick={() => handleDeleteZone(zone.id)} className="btn btn-glass btn-xs text-red-400" style={{ padding: '2px 6px', fontSize: '11px' }}>Xóa</button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 border-t border-white/5 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px' }}>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block mb-1">Cổng kết nối được mở:</span>
+                        <div className="flex flex-wrap gap-1" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {zone.ports.map((p, idx) => (
+                            <span key={idx} className="bg-indigo-500/10 text-indigo-300 border border-indigo-500/10 rounded px-1.5 py-0.5 text-[10px] font-mono">
+                              {p.port}/{p.proto || 'any'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: '8px' }}>
+                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block mb-1">Địa chỉ IP an toàn:</span>
+                        <div className="flex flex-wrap gap-1" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {zone.ips.map((ip, idx) => (
+                            <span key={idx} className="bg-green-500/10 text-green-400 border border-green-500/10 rounded px-1.5 py-0.5 text-[10px] font-mono">
+                              {ip}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal Add/Edit Firewall Security Zone */}
+      {showZoneModal && (
+        <div className="modal-overlay">
+          <div className="modal-content card-glass p-6 max-w-md w-full rounded-xl space-y-4" style={{ width: '400px', maxWidth: '90%' }}>
+            <div className="flex justify-between items-center border-b border-white/10 pb-3" style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+              <h2 className="text-lg font-bold text-gray-200">
+                {editingZone ? 'Cập nhật Vùng bảo mật' : 'Thêm Vùng bảo mật mới'}
+              </h2>
+              <button onClick={() => setShowZoneModal(false)} className="text-gray-400 hover:text-white" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveZone} className="space-y-4 text-sm" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium">Tên vùng:</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="VD: Dev Team, Web Servers..."
+                  value={zoneName}
+                  onChange={(e) => setZoneName(e.target.value)}
+                  className="input-glass w-full"
+                  style={{ padding: '8px', width: '100%' }}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium">Danh sách IP an toàn (phân cách bằng dấu phẩy):</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="VD: 1.2.3.4, 5.6.7.8"
+                  value={zoneIps}
+                  onChange={(e) => setZoneIps(e.target.value)}
+                  className="input-glass w-full font-mono text-xs"
+                  style={{ padding: '8px', width: '100%' }}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium">Các cổng được truy cập (e.g. 22/tcp, 3306/tcp, 3000):</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="VD: 22/tcp, 3306/tcp, 3000"
+                  value={zonePorts}
+                  onChange={(e) => setZonePorts(e.target.value)}
+                  className="input-glass w-full font-mono text-xs"
+                  style={{ padding: '8px', width: '100%' }}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium">Mô tả chi tiết:</label>
+                <textarea
+                  placeholder="VD: Nhóm máy chủ chạy frontend..."
+                  value={zoneDescription}
+                  onChange={(e) => setZoneDescription(e.target.value)}
+                  className="input-glass w-full text-xs"
+                  style={{ padding: '8px', height: '60px', width: '100%' }}
+                />
+              </div>
+
+              <div className="modal-footer pt-3 border-t border-white/10 flex justify-end gap-2" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '12px' }}>
+                <button type="button" className="btn btn-glass" onClick={() => setShowZoneModal(false)}>Hủy</button>
+                <button type="submit" className="btn btn-primary">Lưu lại</button>
+              </div>
             </form>
           </div>
         </div>

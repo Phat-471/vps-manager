@@ -25,4 +25,8 @@ router.post('/clean-logs', SystemController.cleanSystemLogs);
 router.post('/change-password', SystemController.changeRootPassword);
 router.post('/setup-check', SystemController.getSetupChecklist);
 
+// Service Health Monitor + Quick Restart (Phase 6)
+router.post('/service-health', SystemController.getServiceHealth);
+router.post('/service-restart', SystemController.quickRestartService);
+
 module.exports = router;

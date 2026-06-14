@@ -509,6 +509,260 @@ async function checkRcloneStatus(req, res) {
     }
 }
 
+/**
+ * API: Lấy danh sách các rclone remote
+ */
+async function listRcloneRemotes(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const check = await ssh.executeCommand('which rclone');
+        if (check.code !== 0) {
+            return res.json({ success: true, remotes: {}, installed: false });
+        }
+
+        const result = await ssh.executeCommand('rclone config dump');
+        let remotes = {};
+        if (result.code === 0) {
+            try {
+                remotes = JSON.parse(result.stdout.trim() || '{}');
+            } catch (e) {
+                // empty or invalid
+            }
+        }
+
+        res.json({
+            success: true,
+            remotes,
+            installed: true
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * Helpers cập nhật INI config
+ */
+function updateIniConfig(iniContent, name, type, parameters) {
+    const lines = iniContent.split(/\r?\n/);
+    const newLines = [];
+    let insideTargetSection = false;
+    let sectionFound = false;
+
+    const sectionHeader = `[${name}]`;
+    const sectionBody = [`type = ${type}`];
+    for (const [k, v] of Object.entries(parameters)) {
+        if (k === 'type' || v === undefined || v === null) continue;
+        sectionBody.push(`${k} = ${v}`);
+    }
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            if (insideTargetSection) {
+                newLines.push(sectionHeader);
+                newLines.push(...sectionBody);
+                newLines.push('');
+                insideTargetSection = false;
+            }
+            if (trimmed === sectionHeader) {
+                insideTargetSection = true;
+                sectionFound = true;
+                continue;
+            }
+        }
+
+        if (insideTargetSection) {
+            continue;
+        }
+
+        newLines.push(line);
+    }
+
+    if (insideTargetSection) {
+        newLines.push(sectionHeader);
+        newLines.push(...sectionBody);
+        newLines.push('');
+    } else if (!sectionFound) {
+        if (newLines.length > 0 && newLines[newLines.length - 1].trim() !== '') {
+            newLines.push('');
+        }
+        newLines.push(sectionHeader);
+        newLines.push(...sectionBody);
+        newLines.push('');
+    }
+
+    return newLines.join('\n');
+}
+
+function updateIniConfigWithRaw(iniContent, rawConfigBlock) {
+    const match = rawConfigBlock.match(/^\s*\[([^\]]+)\]/m);
+    if (!match) {
+        throw new Error('Định dạng cấu hình không hợp lệ. Phải chứa [tên_remote] ở dòng đầu.');
+    }
+    const name = match[1].trim();
+
+    const lines = iniContent.split(/\r?\n/);
+    const newLines = [];
+    let insideTargetSection = false;
+    let sectionFound = false;
+
+    const sectionHeader = `[${name}]`;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            if (insideTargetSection) {
+                newLines.push(rawConfigBlock.trim());
+                newLines.push('');
+                insideTargetSection = false;
+            }
+            if (trimmed === sectionHeader) {
+                insideTargetSection = true;
+                sectionFound = true;
+                continue;
+            }
+        }
+
+        if (insideTargetSection) {
+            continue;
+        }
+
+        newLines.push(line);
+    }
+
+    if (insideTargetSection) {
+        newLines.push(rawConfigBlock.trim());
+        newLines.push('');
+    } else if (!sectionFound) {
+        if (newLines.length > 0 && newLines[newLines.length - 1].trim() !== '') {
+            newLines.push('');
+        }
+        newLines.push(rawConfigBlock.trim());
+        newLines.push('');
+    }
+
+    return newLines.join('\n');
+}
+
+function deleteIniSection(iniContent, name) {
+    const lines = iniContent.split(/\r?\n/);
+    const newLines = [];
+    let insideTargetSection = false;
+    const sectionHeader = `[${name}]`;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            if (insideTargetSection) {
+                insideTargetSection = false;
+            }
+            if (trimmed === sectionHeader) {
+                insideTargetSection = true;
+                continue;
+            }
+        }
+
+        if (insideTargetSection) {
+            continue;
+        }
+
+        newLines.push(line);
+    }
+
+    return newLines.join('\n');
+}
+
+/**
+ * API: Lưu rclone remote (form/raw)
+ */
+async function saveRcloneRemote(req, res) {
+    try {
+        const { vpsConfig, name, type, parameters, rawConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        // Đảm bảo thư mục config tồn tại
+        await ssh.executeCommand('mkdir -p /root/.config/rclone');
+
+        // Đọc config hiện tại
+        const configPath = '/root/.config/rclone/rclone.conf';
+        const readResult = await ssh.executeCommand(`cat ${configPath} 2>/dev/null || true`);
+        const currentConfig = readResult.stdout;
+
+        let newConfig = '';
+        if (rawConfig) {
+            newConfig = updateIniConfigWithRaw(currentConfig, rawConfig);
+        } else {
+            if (!name || !type || !parameters) {
+                return res.status(400).json({ success: false, error: 'Thiếu thông tin cấu hình' });
+            }
+            newConfig = updateIniConfig(currentConfig, name, type, parameters);
+        }
+
+        await ssh.writeFile(configPath, newConfig);
+
+        res.json({
+            success: true,
+            message: 'Đã lưu cấu hình remote thành công'
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * API: Xóa rclone remote
+ */
+async function deleteRcloneRemote(req, res) {
+    try {
+        const { vpsConfig, name } = req.body;
+        if (!name) {
+            return res.status(400).json({ success: false, error: 'Thiếu tên remote cần xóa' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const configPath = '/root/.config/rclone/rclone.conf';
+        const readResult = await ssh.executeCommand(`cat ${configPath} 2>/dev/null || true`);
+        const currentConfig = readResult.stdout;
+
+        const newConfig = deleteIniSection(currentConfig, name);
+        await ssh.writeFile(configPath, newConfig);
+
+        res.json({
+            success: true,
+            message: 'Đã xóa remote thành công'
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * API: Kiểm tra kết nối rclone remote
+ */
+async function testRcloneRemote(req, res) {
+    try {
+        const { vpsConfig, name } = req.body;
+        if (!name) {
+            return res.status(400).json({ success: false, error: 'Thiếu tên remote cần kiểm tra' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const result = await ssh.executeCommand(`rclone lsd ${escapeShellArg(name)}:`);
+
+        res.json({
+            success: result.code === 0,
+            code: result.code,
+            stdout: result.stdout,
+            stderr: result.stderr
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listBackups,
     createBackup,
@@ -517,5 +771,9 @@ module.exports = {
     downloadBackup,
     installRclone,
     checkRcloneStatus,
+    listRcloneRemotes,
+    saveRcloneRemote,
+    deleteRcloneRemote,
+    testRcloneRemote,
     RUNNER_PATH
 };
