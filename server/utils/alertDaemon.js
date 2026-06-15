@@ -1,5 +1,12 @@
+const fs = require('fs');
+const path = require('path');
 const { SSHConnection } = require('./ssh');
 const AlertController = require('../controllers/AlertController');
+
+let ioInstance = null;
+function setIo(io) {
+    ioInstance = io;
+}
 
 // Cooldown tracking in memory: key `${vpsId}:${metric}` -> timestamp
 const lastAlerts = new Map();
@@ -57,6 +64,51 @@ function shouldAlert(vpsId, metric) {
 function clearCooldown(vpsId, metric) {
     const key = `${vpsId}:${metric}`;
     lastAlerts.delete(key);
+}
+
+/**
+ * Save CPU, RAM, Disk metrics to a JSON history file
+ */
+function saveHistoricalStats(vpsId, cpu, ram, disk) {
+    try {
+        const historyDir = path.join(__dirname, '../data');
+        if (!fs.existsSync(historyDir)) {
+            fs.mkdirSync(historyDir, { recursive: true });
+        }
+        const historyFile = path.join(historyDir, `vps_history_${vpsId}.json`);
+        
+        let history = [];
+        if (fs.existsSync(historyFile)) {
+            const raw = fs.readFileSync(historyFile, 'utf8');
+            try {
+                history = JSON.parse(raw);
+            } catch (e) {
+                history = [];
+            }
+        }
+        
+        const newEntry = {
+            timestamp: Date.now(),
+            cpu: Number(cpu.toFixed(1)),
+            ram: Number(ram.toFixed(1)),
+            disk: Number(disk.toFixed(1))
+        };
+        
+        history.push(newEntry);
+        
+        // Filter out entries older than 24 hours
+        const limitTime = Date.now() - 24 * 60 * 60 * 1000;
+        history = history.filter(item => item.timestamp > limitTime);
+        
+        // Keep max 300 entries to prevent file bloat
+        if (history.length > 300) {
+            history = history.slice(history.length - 300);
+        }
+        
+        fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), 'utf8');
+    } catch (err) {
+        console.error(`Failed to save historical stats for VPS ${vpsId}:`, err.message);
+    }
 }
 
 /**
@@ -176,12 +228,28 @@ async function checkVPS(vpsId, threshold, channels) {
         const ramUsage = parseFloat(lines[1].trim());
         const diskUsage = parseFloat(lines[2].trim());
 
+        // Save historical stats
+        if (!isNaN(cpuUsage) && !isNaN(ramUsage) && !isNaN(diskUsage)) {
+            saveHistoricalStats(vpsId, cpuUsage, ramUsage, diskUsage);
+        }
+
         // 3. Evaluate thresholds
         if (!isNaN(cpuUsage) && cpuUsage > threshold.cpuLimit) {
             if (shouldAlert(vpsId, 'cpu')) {
                 const rawMsg = `⚠️ **[ALERT] QUÁ TẢI CPU**\n\n**Máy chủ:** ${threshold.host}\n**Sử dụng hiện tại:** ${cpuUsage.toFixed(1)}%\n**Ngưỡng giới hạn:** ${threshold.cpuLimit}%\n\nVui lòng kiểm tra lại các tiến trình đang hoạt động trên VPS.`;
-                const htmlMsg = `⚠️ <b>[ALERT] QUÁ TẢI CPU</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Sử dụng hiện tại:</b> ${cpuUsage.toFixed(1)}<b>Ngưỡng giới hạn:</b> ${threshold.cpuLimit}%\n\nVui lòng kiểm tra lại các tiến trình đang hoạt động trên VPS.`;
+                const htmlMsg = `⚠️ <b>[ALERT] QUÁ TẢI CPU</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Sử dụng hiện tại:</b> ${cpuUsage.toFixed(1)}%<b>Ngưỡng giới hạn:</b> ${threshold.cpuLimit}%\n\nVui lòng kiểm tra lại các tiến trình đang hoạt động trên VPS.`;
                 await dispatchAlert(channels, rawMsg, htmlMsg);
+
+                const event = AlertController.logAlertEvent({
+                    vpsId,
+                    host: threshold.host,
+                    type: 'cpu',
+                    level: 'danger',
+                    message: `Quá tải CPU: Sử dụng hiện tại ${cpuUsage.toFixed(1)}% vượt quá ngưỡng ${threshold.cpuLimit}%`
+                });
+                if (ioInstance) {
+                    ioInstance.emit('alert:event', event);
+                }
             }
         } else {
             clearCooldown(vpsId, 'cpu');
@@ -192,6 +260,17 @@ async function checkVPS(vpsId, threshold, channels) {
                 const rawMsg = `⚠️ **[ALERT] QUÁ TẢI BỘ NHỚ RAM**\n\n**Máy chủ:** ${threshold.host}\n**Sử dụng hiện tại:** ${ramUsage.toFixed(1)}%\n**Ngưỡng giới hạn:** ${threshold.ramLimit}%\n\nVui lòng giải phóng cache hoặc tối ưu hóa dịch vụ.`;
                 const htmlMsg = `⚠️ <b>[ALERT] QUÁ TẢI BỘ NHỚ RAM</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Sử dụng hiện tại:</b> ${ramUsage.toFixed(1)}%\n<b>Ngưỡng giới hạn:</b> ${threshold.ramLimit}%\n\nVui lòng giải phóng cache hoặc tối ưu hóa dịch vụ.`;
                 await dispatchAlert(channels, rawMsg, htmlMsg);
+
+                const event = AlertController.logAlertEvent({
+                    vpsId,
+                    host: threshold.host,
+                    type: 'ram',
+                    level: 'danger',
+                    message: `Quá tải RAM: Sử dụng hiện tại ${ramUsage.toFixed(1)}% vượt quá ngưỡng ${threshold.ramLimit}%`
+                });
+                if (ioInstance) {
+                    ioInstance.emit('alert:event', event);
+                }
             }
         } else {
             clearCooldown(vpsId, 'ram');
@@ -202,6 +281,17 @@ async function checkVPS(vpsId, threshold, channels) {
                 const rawMsg = `⚠️ **[ALERT] CẠN KIỆT DUNG LƯỢNG Ổ ĐĨA**\n\n**Máy chủ:** ${threshold.host}\n**Sử dụng hiện tại:** ${diskUsage.toFixed(1)}%\n**Ngưỡng giới hạn:** ${threshold.diskLimit}%\n\nVui lòng dọn dẹp các tệp tin logs rác hoặc nâng cấp gói đĩa cứng VPS.`;
                 const htmlMsg = `⚠️ <b>[ALERT] CẠN KIỆT DUNG LƯỢNG Ổ ĐĨA</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Sử dụng hiện tại:</b> ${diskUsage.toFixed(1)}%\n<b>Ngưỡng giới hạn:</b> ${threshold.diskLimit}%\n\nVui lòng dọn dẹp các tệp tin logs rác hoặc nâng cấp gói đĩa cứng VPS.`;
                 await dispatchAlert(channels, rawMsg, htmlMsg);
+
+                const event = AlertController.logAlertEvent({
+                    vpsId,
+                    host: threshold.host,
+                    type: 'disk',
+                    level: 'danger',
+                    message: `Cạn kiệt dung lượng ổ đĩa: Sử dụng hiện tại ${diskUsage.toFixed(1)}% vượt quá ngưỡng ${threshold.diskLimit}%`
+                });
+                if (ioInstance) {
+                    ioInstance.emit('alert:event', event);
+                }
             }
         } else {
             clearCooldown(vpsId, 'disk');
@@ -216,6 +306,17 @@ async function checkVPS(vpsId, threshold, channels) {
                     const rawMsg = `🔄 **[AUTO-HEALING] KHÔI PHỤC DỊCH VỤ THÀNH CÔNG**\n\n**Máy chủ:** ${threshold.host}\n**Dịch vụ:** \`${svc}\` bị sập đột ngột.\n**Hành động:** Hệ thống đã tự động gửi lệnh khởi động lại (\`systemctl start ${svc}\`) và khôi phục hoạt động thành công!`;
                     const htmlMsg = `🔄 <b>[AUTO-HEALING] KHÔI PHỤC DỊCH VỤ THÀNH CÔNG</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Dịch vụ:</b> <code>${svc}</code> bị sập đột ngột.\n<b>Hành động:</b> Hệ thống đã tự động gửi lệnh khởi động lại (<code>systemctl start ${svc}</code>) và khôi phục hoạt động thành công!`;
                     await dispatchAlert(channels, rawMsg, htmlMsg);
+
+                    const event = AlertController.logAlertEvent({
+                        vpsId,
+                        host: threshold.host,
+                        type: 'recovery_success',
+                        level: 'success',
+                        message: `Khôi phục dịch vụ thành công: Đã tự động khởi động lại dịch vụ ${svc}`
+                    });
+                    if (ioInstance) {
+                        ioInstance.emit('alert:event', event);
+                    }
                 }
             } else if (trimmedLine.startsWith('SERVICE_RECOVERY_FAILED:')) {
                 const svc = trimmedLine.split(':')[1];
@@ -223,6 +324,17 @@ async function checkVPS(vpsId, threshold, channels) {
                     const rawMsg = `🚨 **[AUTO-HEALING] KHÔI PHỤC DỊCH VỤ THẤT BẠI**\n\n**Máy chủ:** ${threshold.host}\n**Dịch vụ:** \`${svc}\` bị sập đột ngột.\n**Hành động:** Hệ thống đã tự động chạy lệnh khởi động lại nhưng dịch vụ **vẫn không hoạt động**.\n\n⚠️ Vui lòng truy cập Terminal để kiểm tra cấu hình lỗi.`;
                     const htmlMsg = `🚨 <b>[AUTO-HEALING] KHÔI PHỤC DỊCH VỤ THẤT BẠI</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Dịch vụ:</b> <code>${svc}</code> bị sập đột ngột.\n<b>Hành động:</b> Hệ thống đã tự động chạy lệnh khởi động lại nhưng dịch vụ <b>vẫn không hoạt động</b>.\n\n⚠️ Vui lòng truy cập Terminal để kiểm tra cấu hình lỗi.`;
                     await dispatchAlert(channels, rawMsg, htmlMsg);
+
+                    const event = AlertController.logAlertEvent({
+                        vpsId,
+                        host: threshold.host,
+                        type: 'recovery_fail',
+                        level: 'danger',
+                        message: `Khôi phục dịch vụ thất bại: Không thể tự động khởi động lại dịch vụ ${svc}`
+                    });
+                    if (ioInstance) {
+                        ioInstance.emit('alert:event', event);
+                    }
                 }
             }
         }
@@ -236,6 +348,17 @@ async function checkVPS(vpsId, threshold, channels) {
                 const rawMsg = `🚨 **[ALERT] VPS MẤT KẾT NỐI (DOWNTIME)**\n\n**Máy chủ:** ${threshold.host}\n**Trạng thái:** Không thể thiết lập kết nối SSH tới máy chủ.\n**Chi tiết:** ${err.message}\n\n⚠️ Máy chủ có thể đã sập nguồn, khởi động lại hoặc gặp sự cố mạng diện rộng.`;
                 const htmlMsg = `🚨 <b>[ALERT] VPS MẤT KẾT NỐI (DOWNTIME)</b>\n\n<b>Máy chủ:</b> ${threshold.host}\n<b>Trạng thái:</b> Không thể thiết lập kết nối SSH tới máy chủ.\n<b>Chi tiết:</b> ${err.message}\n\n⚠️ Máy chủ có thể đã sập nguồn, khởi động lại hoặc gặp sự cố mạng diện rộng.`;
                 await dispatchAlert(channels, rawMsg, htmlMsg);
+
+                const event = AlertController.logAlertEvent({
+                    vpsId,
+                    host: threshold.host,
+                    type: 'downtime',
+                    level: 'danger',
+                    message: `VPS Mất kết nối (Downtime): Không thể kết nối SSH tới máy chủ`
+                });
+                if (ioInstance) {
+                    ioInstance.emit('alert:event', event);
+                }
             }
         }
     }
@@ -288,8 +411,14 @@ function stop() {
     }
 }
 
+function getIo() {
+    return ioInstance;
+}
+
 module.exports = {
     init,
     stop,
+    setIo,
+    getIo,
     checkAllThresholds
 };

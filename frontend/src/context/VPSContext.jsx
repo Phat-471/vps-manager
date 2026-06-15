@@ -86,7 +86,12 @@ export const VPSProvider = ({ children }) => {
   useEffect(() => {
     if (!currentVPS) return;
 
-    const newSocket = io();
+    const token = localStorage.getItem('panelToken');
+    const newSocket = io({
+      auth: {
+        token: token || ''
+      }
+    });
     setSocket(newSocket);
 
     newSocket.on('connect', () => {

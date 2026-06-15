@@ -6,6 +6,18 @@ async function getUFWStatus(req, res) {
         const { vpsConfig } = req.body;
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
+        const checkInstalled = await ssh.executeCommand('which ufw');
+        if (checkInstalled.code !== 0) {
+            return res.json({
+                success: true,
+                data: {
+                    installed: false,
+                    active: false,
+                    rules: []
+                }
+            });
+        }
+
         const result = await ssh.executeCommand('ufw status numbered');
         const isActive = result.stdout.includes('Status: active');
 
@@ -29,6 +41,7 @@ async function getUFWStatus(req, res) {
         res.json({
             success: true,
             data: {
+                installed: true,
                 active: isActive,
                 rules: rules
             }
@@ -43,9 +56,25 @@ async function enableUFW(req, res) {
     try {
         const { vpsConfig } = req.body;
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        
+        // 1. Kiểm tra / cài đặt UFW nếu chưa có
+        const checkUfw = await ssh.executeCommand('which ufw');
+        if (checkUfw.code !== 0) {
+            const installCmd = `
+                if [ -f /etc/debian_version ]; then
+                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ufw
+                else
+                    yum install -y epel-release && yum install -y ufw
+                fi
+            `;
+            await ssh.executeCommand(installCmd);
+        }
+
         // Ensure SSH port is open first
-        await ssh.executeCommand('ufw allow 22/tcp');
+        const sshPort = vpsConfig.port || 22;
+        await ssh.executeCommand(`ufw allow ${sshPort}/tcp`);
         await ssh.executeCommand('echo "y" | ufw enable');
+        await ssh.executeCommand('systemctl enable ufw && systemctl start ufw');
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 }
@@ -63,7 +92,6 @@ async function addUFWRule(req, res) {
     try {
         const { vpsConfig, port, proto, action = 'allow', fromIP = 'any' } = req.body;
         const safeProto = sanitizeProto(proto);
-        const safePort = escapeShellArg(port);
         const safeAction = ['allow', 'deny', 'limit', 'reject'].includes(action.toLowerCase()) ? action.toLowerCase() : 'allow';
         const safeFrom = fromIP && fromIP.trim() !== '' ? fromIP.trim() : 'any';
 
@@ -74,46 +102,54 @@ async function addUFWRule(req, res) {
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
-        let cmd = `ufw `;
-        if (safeAction === 'limit') {
-            if (safeFrom !== 'any' && safeFrom !== 'Anywhere') {
-                cmd += `limit from ${escapeShellArg(safeFrom)} to any port ${safePort}`;
-                if (safeProto && safeProto !== 'any') {
-                    cmd += ` proto ${safeProto}`;
-                }
-            } else {
-                cmd += `limit ${safePort}`;
-                if (safeProto && safeProto !== 'any') {
-                    cmd += `/${safeProto}`;
-                }
-            }
-        } else {
-            cmd += `${safeAction} `;
-            if (safeFrom !== 'any' && safeFrom !== 'Anywhere') {
-                if (safePort && safePort !== 'any') {
+        const ports = String(port).split(',').map(p => p.trim()).filter(Boolean);
+        if (ports.length === 0) {
+            return res.status(400).json({ success: false, error: 'Cổng dịch vụ không hợp lệ.' });
+        }
+
+        for (const singlePort of ports) {
+            const safePort = escapeShellArg(singlePort);
+            let cmd = `ufw `;
+            if (safeAction === 'limit') {
+                if (safeFrom !== 'any' && safeFrom !== 'Anywhere') {
+                    cmd += `limit from ${escapeShellArg(safeFrom)} to any port ${safePort}`;
                     if (safeProto && safeProto !== 'any') {
-                        cmd += `proto ${safeProto} from ${escapeShellArg(safeFrom)} to any port ${safePort}`;
-                    } else {
-                        cmd += `from ${escapeShellArg(safeFrom)} to any port ${safePort}`;
+                        cmd += ` proto ${safeProto}`;
                     }
                 } else {
-                    cmd += `from ${escapeShellArg(safeFrom)}`;
-                }
-            } else {
-                if (safePort && safePort !== 'any') {
-                    cmd += `${safePort}`;
+                    cmd += `limit ${safePort}`;
                     if (safeProto && safeProto !== 'any') {
                         cmd += `/${safeProto}`;
                     }
+                }
+            } else {
+                cmd += `${safeAction} `;
+                if (safeFrom !== 'any' && safeFrom !== 'Anywhere') {
+                    if (safePort && safePort !== 'any') {
+                        if (safeProto && safeProto !== 'any') {
+                            cmd += `proto ${safeProto} from ${escapeShellArg(safeFrom)} to any port ${safePort}`;
+                        } else {
+                            cmd += `from ${escapeShellArg(safeFrom)} to any port ${safePort}`;
+                        }
+                    } else {
+                        cmd += `from ${escapeShellArg(safeFrom)}`;
+                    }
                 } else {
-                    cmd += `any`;
+                    if (safePort && safePort !== 'any') {
+                        cmd += `${safePort}`;
+                        if (safeProto && safeProto !== 'any') {
+                            cmd += `/${safeProto}`;
+                        }
+                    } else {
+                        cmd += `any`;
+                    }
                 }
             }
-        }
 
-        const result = await ssh.executeCommand(cmd);
-        if (result.code !== 0) {
-            throw new Error(result.stderr || 'Lệnh thực thi UFW thất bại');
+            const result = await ssh.executeCommand(cmd);
+            if (result.code !== 0) {
+                throw new Error(result.stderr || `Lệnh thực thi UFW thất bại cho cổng ${singlePort}`);
+            }
         }
 
         res.json({ success: true });
@@ -136,12 +172,267 @@ async function getFail2BanStatus(req, res) {
     try {
         const { vpsConfig } = req.body;
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
-        const result = await ssh.executeCommand('systemctl is-active fail2ban');
+
+        const checkInstalled = await ssh.executeCommand('which fail2ban-client');
+        const installed = checkInstalled.code === 0;
+
+        let active = false;
+        let jails = [];
+        let config = {
+            ignoreip: '127.0.0.1/8 ::1',
+            bantime: '10m',
+            findtime: '10m',
+            maxretry: '5'
+        };
+
+        if (installed) {
+            const result = await ssh.executeCommand('systemctl is-active fail2ban');
+            active = result.stdout.trim() === 'active';
+
+            if (active) {
+                // Get jails list
+                const jailsResult = await ssh.executeCommand('fail2ban-client status');
+                const jailListLine = jailsResult.stdout.split('\n').find(line => line.includes('Jail list:'));
+                const jailNames = jailListLine
+                    ? jailListLine.split('Jail list:')[1].trim().split(/,\s+/).filter(Boolean)
+                    : [];
+
+                for (const name of jailNames) {
+                    const statusResult = await ssh.executeCommand(`fail2ban-client status ${name}`);
+                    const stdout = statusResult.stdout;
+
+                    const currentlyFailedMatch = stdout.match(/Currently failed:\s+(\d+)/);
+                    const totalFailedMatch = stdout.match(/Total failed:\s+(\d+)/);
+                    const currentlyBannedMatch = stdout.match(/Currently banned:\s+(\d+)/);
+                    const totalBannedMatch = stdout.match(/Total banned:\s+(\d+)/);
+                    const bannedIpListMatch = stdout.match(/Banned IP list:\s*(.*)/);
+
+                    jails.push({
+                        name,
+                        currentlyFailed: currentlyFailedMatch ? parseInt(currentlyFailedMatch[1]) : 0,
+                        totalFailed: totalFailedMatch ? parseInt(totalFailedMatch[1]) : 0,
+                        currentlyBanned: currentlyBannedMatch ? parseInt(currentlyBannedMatch[1]) : 0,
+                        totalBanned: totalBannedMatch ? parseInt(totalBannedMatch[1]) : 0,
+                        bannedIPs: bannedIpListMatch && bannedIpListMatch[1].trim()
+                            ? bannedIpListMatch[1].trim().split(/\s+/)
+                            : []
+                    });
+                }
+            }
+
+            // Read configuration from jail.local if it exists, otherwise jail.conf
+            const checkLocal = await ssh.executeCommand('test -f /etc/fail2ban/jail.local && echo "OK" || echo "NO"');
+            let configContent = '';
+            if (checkLocal.stdout.trim() === 'OK') {
+                const configResult = await ssh.executeCommand('cat /etc/fail2ban/jail.local');
+                configContent = configResult.stdout;
+            } else {
+                const checkConf = await ssh.executeCommand('test -f /etc/fail2ban/jail.conf && echo "OK" || echo "NO"');
+                if (checkConf.stdout.trim() === 'OK') {
+                    const configResult = await ssh.executeCommand('cat /etc/fail2ban/jail.conf');
+                    configContent = configResult.stdout;
+                }
+            }
+
+            if (configContent) {
+                const defaultRegex = /\[DEFAULT\]([\s\S]*?)(?:\[|$)/i;
+                const match = configContent.match(defaultRegex);
+                if (match) {
+                    const defaultSection = match[1];
+                    const ignoreipMatch = defaultSection.match(/^[#\s]*ignoreip\s*=\s*(.*)$/m);
+                    const bantimeMatch = defaultSection.match(/^[#\s]*bantime\s*=\s*(.*)$/m);
+                    const findtimeMatch = defaultSection.match(/^[#\s]*findtime\s*=\s*(.*)$/m);
+                    const maxretryMatch = defaultSection.match(/^[#\s]*maxretry\s*=\s*(.*)$/m);
+
+                    if (ignoreipMatch) config.ignoreip = ignoreipMatch[1].trim();
+                    if (bantimeMatch) config.bantime = bantimeMatch[1].trim();
+                    if (findtimeMatch) config.findtime = findtimeMatch[1].trim();
+                    if (maxretryMatch) config.maxretry = maxretryMatch[1].trim();
+                }
+            }
+        }
+
         res.json({
             success: true,
-            data: { active: result.stdout.trim() === 'active' }
+            data: {
+                installed,
+                active,
+                jails,
+                config
+            }
         });
-    } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function saveFail2BanConfig(req, res) {
+    try {
+        const { vpsConfig, ignoreip, bantime, findtime, maxretry } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const checkLocal = await ssh.executeCommand('test -f /etc/fail2ban/jail.local && echo "OK" || echo "NO"');
+        let content = '';
+        if (checkLocal.stdout.trim() === 'OK') {
+            const configResult = await ssh.executeCommand('cat /etc/fail2ban/jail.local');
+            content = configResult.stdout;
+        } else {
+            // Write a basic default template first
+            content = `[DEFAULT]
+# Ban hosts for 10 minutes
+bantime = 10m
+
+# A host is banned if it has generated "maxretry" during the last "findtime"
+findtime = 10m
+
+# "maxretry" is the number of failures before a host get banned.
+maxretry = 5
+
+# "ignoreip" can be an IP address, a CIDR mask or a DNS host. Fail2ban will not
+# ban a host which matches an address in this list.
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled = true
+port = ssh
+logpath = %(sshd_log)s
+backend = %(sshd_backend)s
+`;
+        }
+
+        const updateDefaultConfig = (fileContent, key, value) => {
+            const defaultRegex = /\[DEFAULT\]([\s\S]*?)(?:\[|$)/i;
+            const match = fileContent.match(defaultRegex);
+            if (!match) {
+                return `[DEFAULT]\n${key} = ${value}\n\n` + fileContent;
+            }
+            
+            const defaultSection = match[1];
+            const keyRegex = new RegExp(`^[#\\s]*${key}\\s*=.*$`, 'm');
+            
+            let newDefaultSection;
+            if (keyRegex.test(defaultSection)) {
+                newDefaultSection = defaultSection.replace(keyRegex, `${key} = ${value}`);
+            } else {
+                newDefaultSection = defaultSection.trimEnd() + `\n${key} = ${value}\n\n`;
+            }
+            
+            return fileContent.replace(match[0], `[DEFAULT]${newDefaultSection}`);
+        };
+
+        let updatedContent = content;
+        if (ignoreip !== undefined) updatedContent = updateDefaultConfig(updatedContent, 'ignoreip', ignoreip);
+        if (bantime !== undefined) updatedContent = updateDefaultConfig(updatedContent, 'bantime', bantime);
+        if (findtime !== undefined) updatedContent = updateDefaultConfig(updatedContent, 'findtime', findtime);
+        if (maxretry !== undefined) updatedContent = updateDefaultConfig(updatedContent, 'maxretry', maxretry);
+
+        await ssh.writeFile('/etc/fail2ban/jail.local', updatedContent);
+        await ssh.executeCommand('fail2ban-client reload || systemctl restart fail2ban');
+
+        res.json({ success: true, message: 'Đã cập nhật cấu hình Fail2Ban thành công!' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function getRawFail2BanConfig(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const checkLocal = await ssh.executeCommand('test -f /etc/fail2ban/jail.local && echo "OK" || echo "NO"');
+        let content = '';
+        if (checkLocal.stdout.trim() === 'OK') {
+            const configResult = await ssh.executeCommand('cat /etc/fail2ban/jail.local');
+            content = configResult.stdout;
+        } else {
+            const checkConf = await ssh.executeCommand('test -f /etc/fail2ban/jail.conf && echo "OK" || echo "NO"');
+            if (checkConf.stdout.trim() === 'OK') {
+                const configResult = await ssh.executeCommand('cat /etc/fail2ban/jail.conf');
+                content = configResult.stdout;
+            } else {
+                content = `# Cấu hình Fail2Ban trống. Hãy điền các chỉ thị của bạn.\n[DEFAULT]\nbantime = 10m\nfindtime = 10m\nmaxretry = 5\nignoreip = 127.0.0.1/8 ::1\n\n[sshd]\nenabled = true\n`;
+            }
+        }
+
+        res.json({ success: true, data: content });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function saveRawFail2BanConfig(req, res) {
+    try {
+        const { vpsConfig, content } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        await ssh.writeFile('/etc/fail2ban/jail.local', content);
+        await ssh.executeCommand('fail2ban-client reload || systemctl restart fail2ban');
+
+        res.json({ success: true, message: 'Đã lưu cấu hình thô Fail2Ban thành công và tải lại dịch vụ!' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function unbanFail2BanIP(req, res) {
+    try {
+        const { vpsConfig, jail, ip } = req.body;
+        if (!jail || !ip) {
+            return res.status(400).json({ success: false, error: 'Thiếu thông tin jail hoặc IP.' });
+        }
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const result = await ssh.executeCommand(`fail2ban-client set ${escapeShellArg(jail)} unbanip ${escapeShellArg(ip)}`);
+        if (result.code !== 0) {
+            throw new Error(result.stderr || `Không thể gỡ chặn IP ${ip} khỏi jail ${jail}`);
+        }
+
+        res.json({ success: true, message: `Đã gỡ chặn IP ${ip} thành công!` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function banFail2BanIP(req, res) {
+    try {
+        const { vpsConfig, jail, ip } = req.body;
+        if (!jail || !ip) {
+            return res.status(400).json({ success: false, error: 'Thiếu thông tin jail hoặc IP.' });
+        }
+        if (!isValidIP(ip.trim())) {
+            return res.status(400).json({ success: false, error: 'Địa chỉ IP không hợp lệ.' });
+        }
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const result = await ssh.executeCommand(`fail2ban-client set ${escapeShellArg(jail)} banip ${escapeShellArg(ip.trim())}`);
+        if (result.code !== 0) {
+            throw new Error(result.stderr || `Không thể chặn IP ${ip} trong jail ${jail}`);
+        }
+
+        res.json({ success: true, message: `Đã chặn IP ${ip} thành công!` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function controlFail2BanService(req, res) {
+    try {
+        const { vpsConfig, action } = req.body;
+        if (!['start', 'stop', 'restart'].includes(action)) {
+            return res.status(400).json({ success: false, error: 'Hành động không hợp lệ.' });
+        }
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const result = await ssh.executeCommand(`systemctl ${action} fail2ban`);
+        if (result.code !== 0) {
+            throw new Error(result.stderr || `Lỗi thực hiện lệnh systemctl ${action} fail2ban`);
+        }
+
+        res.json({ success: true, message: `Đã thực hiện lệnh ${action} Fail2Ban thành công!` });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 }
 
 /**
@@ -398,6 +689,18 @@ async function getBlacklistIPs(req, res) {
         const { vpsConfig } = req.body;
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
+        const checkInstalled = await ssh.executeCommand('which ufw');
+        if (checkInstalled.code !== 0) {
+            return res.json({
+                success: true,
+                data: {
+                    installed: false,
+                    active: false,
+                    ips: []
+                }
+            });
+        }
+
         const result = await ssh.executeCommand('ufw status numbered');
         const isActive = result.stdout.includes('Status: active');
         
@@ -405,7 +708,7 @@ async function getBlacklistIPs(req, res) {
         if (isActive) {
             const lines = result.stdout.trim().split('\n');
             lines.forEach(line => {
-                const match = line.match(/\[\s*(\d+)\]\s+(.*?)\s+DENY IN\s+(\S+)/);
+                const match = line.match(/\[\s*(\d+)\]\s+(.*?)\s+(?:DENY IN|DENY)\s+(\S+)/i);
                 if (match) {
                     blacklist.push({
                         index: match[1],
@@ -419,6 +722,7 @@ async function getBlacklistIPs(req, res) {
         res.json({
             success: true,
             data: {
+                installed: true,
                 active: isActive,
                 ips: blacklist
             }
@@ -446,10 +750,32 @@ async function blockIP(req, res) {
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         
-        // Đảm bảo UFW được bật
-        await ssh.executeCommand('echo "y" | ufw enable');
+        // 1. Kiểm tra / cài đặt UFW nếu chưa có
+        const checkUfw = await ssh.executeCommand('which ufw');
+        if (checkUfw.code !== 0) {
+            const installCmd = `
+                if [ -f /etc/debian_version ]; then
+                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ufw
+                else
+                    yum install -y epel-release && yum install -y ufw
+                fi
+            `;
+            await ssh.executeCommand(installCmd);
+            const checkUfw2 = await ssh.executeCommand('which ufw');
+            if (checkUfw2.code !== 0) {
+                throw new Error('Tường lửa UFW chưa được cài đặt và không thể tự động cài đặt trên VPS này.');
+            }
+        }
+
+        // 2. Mở cổng SSH hiện tại trước khi bật tường lửa để tránh bị khóa truy cập
+        const sshPort = vpsConfig.port || 22;
+        await ssh.executeCommand(`ufw allow ${sshPort}/tcp`);
         
-        // Chèn luật chặn lên hàng đầu
+        // 3. Đảm bảo UFW được bật
+        await ssh.executeCommand('echo "y" | ufw enable');
+        await ssh.executeCommand('systemctl enable ufw && systemctl start ufw');
+        
+        // 4. Chèn luật chặn lên hàng đầu
         const result = await ssh.executeCommand(`ufw insert 1 deny from ${escapeShellArg(cleanIP)} to any`);
         
         if (result.code !== 0) {
@@ -479,6 +805,11 @@ async function unblockIP(req, res) {
         }
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const checkInstalled = await ssh.executeCommand('which ufw');
+        if (checkInstalled.code !== 0) {
+            return res.json({ success: true, message: `Địa chỉ IP ${cleanIP} chưa từng bị chặn (Tường lửa UFW chưa được cài đặt)` });
+        }
         
         const result = await ssh.executeCommand(`ufw delete deny from ${escapeShellArg(cleanIP)} to any`);
         
@@ -577,7 +908,30 @@ async function applyZones(req, res) {
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         const zones = await readZones(ssh);
 
+        // 1. Kiểm tra / cài đặt UFW nếu chưa có
+        const checkUfw = await ssh.executeCommand('which ufw');
+        if (checkUfw.code !== 0) {
+            const installCmd = `
+                if [ -f /etc/debian_version ]; then
+                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ufw
+                else
+                    yum install -y epel-release && yum install -y ufw
+                fi
+            `;
+            await ssh.executeCommand(installCmd);
+            const checkUfw2 = await ssh.executeCommand('which ufw');
+            if (checkUfw2.code !== 0) {
+                throw new Error('Tường lửa UFW chưa được cài đặt và không thể tự động cài đặt trên VPS này.');
+            }
+        }
+
+        // 2. Mở cổng SSH hiện tại trước khi bật tường lửa để tránh bị khóa truy cập
+        const sshPort = vpsConfig.port || 22;
+        await ssh.executeCommand(`ufw allow ${sshPort}/tcp`);
+
+        // 3. Đảm bảo UFW được bật
         await ssh.executeCommand('echo "y" | ufw enable');
+        await ssh.executeCommand('systemctl enable ufw && systemctl start ufw');
 
         const restrictedPorts = new Set();
         zones.forEach(zone => {
@@ -649,5 +1003,11 @@ module.exports = {
     listZones,
     saveZone,
     deleteZone,
-    applyZones
+    applyZones,
+    saveFail2BanConfig,
+    getRawFail2BanConfig,
+    saveRawFail2BanConfig,
+    unbanFail2BanIP,
+    banFail2BanIP,
+    controlFail2BanService
 };

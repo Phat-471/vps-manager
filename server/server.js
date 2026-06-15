@@ -38,7 +38,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: true }));
 
 // Request logging middleware
@@ -71,9 +71,14 @@ const phpRoutes = require('./routes/php');
 const nodeRoutes = require('./routes/node');
 const mailRoutes = require('./routes/mail');
 const installerRoutes = require('./routes/installer');
+const webhookRoutes = require('./routes/webhooks');
+const WebhookController = require('./controllers/WebhookController');
 
 // API Routes (Tuyến đường mở cho Auth)
 app.use('/api/auth', authRoutes);
+
+// Tuyến đường deploy webhook công khai (Xác thực bằng signature)
+app.post('/api/webhooks/deploy/:webhookId', WebhookController.handleDeploy);
 
 // Middleware bảo mật xác thực toàn bộ API của Panel
 const AuthController = require('./controllers/AuthController');
@@ -93,6 +98,7 @@ app.use('/api', (req, res, next) => {
 });
 
 // API Routes (Các tuyến đường được bảo vệ)
+app.use('/api/webhooks', webhookRoutes);
 app.use('/api/vps', vpsRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/files', fileRoutes);
@@ -114,6 +120,22 @@ app.use('/api/mail', mailRoutes);
 app.use('/api/installer', installerRoutes);
 
 // Socket.IO for real-time features
+// Middleware bảo mật xác thực toàn bộ kết nối Socket.IO
+io.use((socket, next) => {
+  if (!process.env.PANEL_PASSWORD) {
+    return next();
+  }
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  if (!token) {
+    return next(new Error('Unauthorized: Thiếu token đăng nhập Socket.IO'));
+  }
+  const AuthController = require('./controllers/AuthController');
+  if (AuthController.verifyToken(token)) {
+    return next();
+  }
+  return next(new Error('Unauthorized: Phiên làm việc hết hạn hoặc không hợp lệ'));
+});
+
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
@@ -183,6 +205,7 @@ server.listen(PORT, () => {
   
   // Khởi động Alert & Monitoring Daemon chạy ngầm
   const alertDaemon = require('./utils/alertDaemon');
+  alertDaemon.setIo(io);
   alertDaemon.init();
 });
 

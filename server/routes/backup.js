@@ -13,5 +13,6 @@ router.post('/rclone/remotes', BackupController.listRcloneRemotes);
 router.post('/rclone/remotes/save', BackupController.saveRcloneRemote);
 router.post('/rclone/remotes/delete', BackupController.deleteRcloneRemote);
 router.post('/rclone/remotes/test', BackupController.testRcloneRemote);
+router.post('/rclone/sync-file', BackupController.syncFileToCloud);
 
 module.exports = router;

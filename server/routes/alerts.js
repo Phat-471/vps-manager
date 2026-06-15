@@ -7,5 +7,7 @@ router.post('/config/save-channels', AlertController.saveChannels);
 router.post('/config/save-threshold', AlertController.saveThreshold);
 router.post('/test/telegram', AlertController.testTelegram);
 router.post('/test/discord', AlertController.testDiscord);
+router.post('/history', AlertController.getAlertHistory);
+router.post('/history/clear', AlertController.clearAlertHistory);
 
 module.exports = router;

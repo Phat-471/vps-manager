@@ -8,6 +8,12 @@ export default function Dashboard() {
   const [cpu, setCpu] = useState(0);
   const [ram, setRam] = useState({ usage: 0, total: 'Đang tải...', used: 'Đang tải...' });
   const [disk, setDisk] = useState({ usage: 0, total: 'Đang tải...', used: 'Đang tải...' });
+
+  // Lịch sử tài nguyên (Historical Stats)
+  const [historyData, setHistoryData] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [visibleMetrics, setVisibleMetrics] = useState({ cpu: true, ram: true, disk: true });
+  const [hoveredPoint, setHoveredPoint] = useState(null);
   const [cpuInfo, setCpuInfo] = useState({ cores: 'Đang tải...', speed: '' });
   const [uptime, setUptime] = useState('--');
   const [systemInfo, setSystemInfo] = useState({
@@ -190,6 +196,349 @@ export default function Dashboard() {
     }
   };
 
+  const fetchHistoryData = async () => {
+    if (!isConnected || !currentVPS) return;
+    setHistoryLoading(true);
+    try {
+      const res = await apiCall('/api/stats/history', 'POST');
+      if (res.success) {
+        setHistoryData(res.data || []);
+      }
+    } catch (err) {
+      console.error('Lỗi tải lịch sử tài nguyên:', err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const renderHistoricalChart = () => {
+    const paddingLeft = 40;
+    const paddingRight = 20;
+    const paddingTop = 20;
+    const paddingBottom = 30;
+    const width = 600;
+    const height = 220;
+    const plotWidth = width - paddingLeft - paddingRight;
+    const plotHeight = height - paddingTop - paddingBottom;
+
+    const getPathD = (key) => {
+      if (historyData.length === 0) return '';
+      if (historyData.length === 1) {
+        const x1 = paddingLeft;
+        const x2 = paddingLeft + plotWidth;
+        const y = paddingTop + plotHeight - (Number(historyData[0][key] || 0) / 100) * plotHeight;
+        return `M ${x1} ${y} L ${x2} ${y}`;
+      }
+      return historyData.map((pt, idx) => {
+        const x = paddingLeft + (idx / (historyData.length - 1)) * plotWidth;
+        const y = paddingTop + plotHeight - (Number(pt[key] || 0) / 100) * plotHeight;
+        return `${idx === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      }).join(' ');
+    };
+
+    const getAreaD = (key) => {
+      if (historyData.length === 0) return '';
+      const baseY = paddingTop + plotHeight;
+      if (historyData.length === 1) {
+        const x1 = paddingLeft;
+        const x2 = paddingLeft + plotWidth;
+        const y = paddingTop + plotHeight - (Number(historyData[0][key] || 0) / 100) * plotHeight;
+        return `M ${x1} ${baseY} L ${x1} ${y} L ${x2} ${y} L ${x2} ${baseY} Z`;
+      }
+      const points = historyData.map((pt, idx) => {
+        const x = paddingLeft + (idx / (historyData.length - 1)) * plotWidth;
+        const y = paddingTop + plotHeight - (Number(pt[key] || 0) / 100) * plotHeight;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      });
+      const firstX = paddingLeft;
+      const lastX = paddingLeft + plotWidth;
+      return `M ${firstX} ${baseY} L ${points.join(' L ')} L ${lastX} ${baseY} Z`;
+    };
+
+    const getXLabels = () => {
+      if (historyData.length === 0) return [];
+      if (historyData.length === 1) {
+        return [{
+          text: new Date(historyData[0].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          x: paddingLeft + plotWidth / 2
+        }];
+      }
+      const count = Math.min(5, historyData.length);
+      const labels = [];
+      const step = (historyData.length - 1) / (count - 1);
+      for (let i = 0; i < count; i++) {
+        const idx = Math.round(i * step);
+        if (historyData[idx]) {
+          labels.push({
+            text: new Date(historyData[idx].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            x: paddingLeft + (idx / (historyData.length - 1)) * plotWidth
+          });
+        }
+      }
+      return labels;
+    };
+
+    const handleMouseMove = (e) => {
+      if (historyData.length === 0) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (!rect.width) return;
+      const mouseX = e.clientX - rect.left;
+      const svgX = (mouseX / rect.width) * width;
+      
+      let idx = 0;
+      if (historyData.length > 1) {
+        const relativeX = svgX - paddingLeft;
+        const percentX = relativeX / plotWidth;
+        idx = Math.round(percentX * (historyData.length - 1));
+        if (idx < 0) idx = 0;
+        if (idx >= historyData.length) idx = historyData.length - 1;
+      }
+      
+      const xCoord = historyData.length > 1
+        ? paddingLeft + (idx / (historyData.length - 1)) * plotWidth
+        : paddingLeft + plotWidth / 2;
+
+      setHoveredPoint({
+        ...historyData[idx],
+        index: idx,
+        x: xCoord
+      });
+    };
+
+    const handleMouseLeave = () => {
+      setHoveredPoint(null);
+    };
+
+    return (
+      <div className="card-glass p-6 rounded-xl mb-6 space-y-4">
+        <div className="flex justify-between items-center flex-wrap gap-4" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div>
+            <h3 className="font-semibold text-sm tracking-wider uppercase text-gray-400 flex items-center gap-2" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Activity className="text-indigo-400" size={16} />
+              Lịch sử sử dụng tài nguyên (24 giờ gần nhất)
+            </h3>
+            <p className="text-xs text-gray-400 mt-0.5">Giám sát tổng quan CPU, RAM, và Dung lượng đĩa ghi nhận định kỳ mỗi 5 phút.</p>
+          </div>
+          
+          {/* Legend Toggles */}
+          <div className="flex items-center gap-4 text-xs" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <input 
+                type="checkbox" 
+                checked={visibleMetrics.cpu} 
+                onChange={() => setVisibleMetrics(prev => ({ ...prev, cpu: !prev.cpu }))} 
+                className="rounded border-white/10 text-purple-500 focus:ring-0 bg-white/5 cursor-pointer"
+                style={{ width: '14px', height: '14px', accentColor: '#a855f7' }}
+              />
+              <span className="w-2.5 h-2.5 rounded-full bg-purple-500" style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%' }} />
+              <span className={visibleMetrics.cpu ? 'text-gray-200' : 'text-gray-500 line-through'}>CPU</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <input 
+                type="checkbox" 
+                checked={visibleMetrics.ram} 
+                onChange={() => setVisibleMetrics(prev => ({ ...prev, ram: !prev.ram }))} 
+                className="rounded border-white/10 text-cyan-500 focus:ring-0 bg-white/5 cursor-pointer"
+                style={{ width: '14px', height: '14px', accentColor: '#06b6d4' }}
+              />
+              <span className="w-2.5 h-2.5 rounded-full bg-cyan-500" style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%' }} />
+              <span className={visibleMetrics.ram ? 'text-gray-200' : 'text-gray-500 line-through'}>RAM</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer select-none" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <input 
+                type="checkbox" 
+                checked={visibleMetrics.disk} 
+                onChange={() => setVisibleMetrics(prev => ({ ...prev, disk: !prev.disk }))} 
+                className="rounded border-white/10 text-orange-500 focus:ring-0 bg-white/5 cursor-pointer"
+                style={{ width: '14px', height: '14px', accentColor: '#f97316' }}
+              />
+              <span className="w-2.5 h-2.5 rounded-full bg-orange-500" style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%' }} />
+              <span className={visibleMetrics.disk ? 'text-gray-200' : 'text-gray-500 line-through'}>Disk</span>
+            </label>
+          </div>
+        </div>
+
+        {historyLoading ? (
+          <div className="py-12 text-center text-gray-400 text-sm flex flex-col items-center justify-center gap-2" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0', gap: '8px' }}>
+            <RefreshCw className="animate-spin text-indigo-400" size={24} />
+            Đang tải dữ liệu lịch sử...
+          </div>
+        ) : historyData.length === 0 ? (
+          <div className="py-8 text-center text-gray-400 border border-dashed border-white/10 rounded-lg" style={{ borderStyle: 'dashed', padding: '32px 0' }}>
+            <Activity className="mx-auto text-gray-500 mb-2" size={32} style={{ margin: '0 auto 8px' }} />
+            <p className="font-semibold text-gray-300 text-sm">Chưa có dữ liệu lịch sử tài nguyên</p>
+            <p className="text-[11px] text-gray-500 max-w-md mx-auto mt-1 px-4">
+              Lịch sử sử dụng sẽ tự động ghi nhận cứ mỗi 5 phút một lần khi tính năng <strong>Cảnh Báo & Giám Sát</strong> được kích hoạt cho VPS này.
+            </p>
+            <button 
+              onClick={() => setActivePage('alerts')} 
+              className="btn btn-glass btn-xs text-indigo-300 mt-3"
+              style={{ padding: '4px 12px', fontSize: '11px', marginTop: '12px' }}
+            >
+              Kích hoạt giám sát ngay
+            </button>
+          </div>
+        ) : (
+          <div className="relative w-full" onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
+            <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible select-none" style={{ background: 'transparent' }}>
+              <defs>
+                <linearGradient id="cpuGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#a855f7" stopOpacity="0.15"/>
+                  <stop offset="100%" stopColor="#a855f7" stopOpacity="0"/>
+                </linearGradient>
+                <linearGradient id="ramGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.15"/>
+                  <stop offset="100%" stopColor="#06b6d4" stopOpacity="0"/>
+                </linearGradient>
+                <linearGradient id="diskGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#f97316" stopOpacity="0.15"/>
+                  <stop offset="100%" stopColor="#f97316" stopOpacity="0"/>
+                </linearGradient>
+              </defs>
+
+              {/* Grid Lines */}
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio, idx) => {
+                const y = paddingTop + ratio * plotHeight;
+                const val = Math.round(100 - ratio * 100);
+                return (
+                  <g key={idx}>
+                    <line 
+                      x1={paddingLeft} 
+                      y1={y} 
+                      x2={width - paddingRight} 
+                      y2={y} 
+                      stroke="rgba(255,255,255,0.05)" 
+                      strokeDasharray="4 4" 
+                    />
+                    <text 
+                      x={paddingLeft - 10} 
+                      y={y + 3} 
+                      textAnchor="end" 
+                      className="fill-gray-500 font-mono text-[9px]"
+                      style={{ fill: '#6b7280' }}
+                    >
+                      {val}%
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Chart Lines & Areas */}
+              {visibleMetrics.disk && (
+                <>
+                  <path d={getAreaD('disk')} fill="url(#diskGrad)" />
+                  <path d={getPathD('disk')} fill="none" stroke="#f97316" strokeWidth="2" strokeLinecap="round" />
+                </>
+              )}
+              {visibleMetrics.ram && (
+                <>
+                  <path d={getAreaD('ram')} fill="url(#ramGrad)" />
+                  <path d={getPathD('ram')} fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" />
+                </>
+              )}
+              {visibleMetrics.cpu && (
+                <>
+                  <path d={getAreaD('cpu')} fill="url(#cpuGrad)" />
+                  <path d={getPathD('cpu')} fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" />
+                </>
+              )}
+
+              {/* X Axis Labels */}
+              {getXLabels().map((label, idx) => (
+                <g key={idx}>
+                  <line 
+                    x1={label.x} 
+                    y1={paddingTop + plotHeight} 
+                    x2={label.x} 
+                    y2={paddingTop + plotHeight + 4} 
+                    stroke="rgba(255,255,255,0.15)" 
+                  />
+                  <text 
+                    x={label.x} 
+                    y={paddingTop + plotHeight + 16} 
+                    textAnchor="middle" 
+                    className="fill-gray-500 font-mono text-[9px]"
+                    style={{ fill: '#6b7280' }}
+                  >
+                    {label.text}
+                  </text>
+                </g>
+              ))}
+
+              {/* Hover Indicator Vertical Line */}
+              {hoveredPoint && (
+                <line 
+                  x1={hoveredPoint.x} 
+                  y1={paddingTop} 
+                  x2={hoveredPoint.x} 
+                  y2={paddingTop + plotHeight} 
+                  stroke="rgba(255,255,255,0.15)" 
+                  strokeDasharray="3 3" 
+                />
+              )}
+
+              {/* Hover Circles */}
+              {hoveredPoint && visibleMetrics.cpu && (
+                <g>
+                  <circle cx={hoveredPoint.x} cy={paddingTop + plotHeight - (Number(hoveredPoint.cpu || 0) / 100) * plotHeight} r="6" fill="#a855f7" opacity="0.3" />
+                  <circle cx={hoveredPoint.x} cy={paddingTop + plotHeight - (Number(hoveredPoint.cpu || 0) / 100) * plotHeight} r="3" fill="#a855f7" stroke="#fff" strokeWidth="1" />
+                </g>
+              )}
+              {hoveredPoint && visibleMetrics.ram && (
+                <g>
+                  <circle cx={hoveredPoint.x} cy={paddingTop + plotHeight - (Number(hoveredPoint.ram || 0) / 100) * plotHeight} r="6" fill="#06b6d4" opacity="0.3" />
+                  <circle cx={hoveredPoint.x} cy={paddingTop + plotHeight - (Number(hoveredPoint.ram || 0) / 100) * plotHeight} r="3" fill="#06b6d4" stroke="#fff" strokeWidth="1" />
+                </g>
+              )}
+              {hoveredPoint && visibleMetrics.disk && (
+                <g>
+                  <circle cx={hoveredPoint.x} cy={paddingTop + plotHeight - (Number(hoveredPoint.disk || 0) / 100) * plotHeight} r="6" fill="#f97316" opacity="0.3" />
+                  <circle cx={hoveredPoint.x} cy={paddingTop + plotHeight - (Number(hoveredPoint.disk || 0) / 100) * plotHeight} r="3" fill="#f97316" stroke="#fff" strokeWidth="1" />
+                </g>
+              )}
+            </svg>
+
+            {hoveredPoint && (
+              <div 
+                className="absolute pointer-events-none card-glass p-3 rounded-lg text-xs space-y-1 shadow-lg border border-white/10"
+                style={{
+                  left: `${(hoveredPoint.x / width) * 100}%`,
+                  top: '10px',
+                  transform: hoveredPoint.index > historyData.length / 2 ? 'translateX(-110%)' : 'translateX(10%)',
+                  minWidth: '140px',
+                  zIndex: 20,
+                  pointerEvents: 'none'
+                }}
+              >
+                <div className="font-semibold text-gray-300 border-b border-white/5 pb-1 mb-1 font-mono">
+                  {new Date(hoveredPoint.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+                {visibleMetrics.cpu && (
+                  <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#a855f7' }}>CPU:</span>
+                    <strong className="text-white font-mono">{Number(hoveredPoint.cpu || 0).toFixed(1)}%</strong>
+                  </div>
+                )}
+                {visibleMetrics.ram && (
+                  <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#06b6d4' }}>RAM:</span>
+                    <strong className="text-white font-mono">{Number(hoveredPoint.ram || 0).toFixed(1)}%</strong>
+                  </div>
+                )}
+                {visibleMetrics.disk && (
+                  <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#f97316' }}>Disk:</span>
+                    <strong className="text-white font-mono">{Number(hoveredPoint.disk || 0).toFixed(1)}%</strong>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const handleQuickService = async (serviceId, action) => {
     setRestartingService(`${serviceId}:${action}`);
     try {
@@ -207,51 +556,77 @@ export default function Dashboard() {
 
 
   useEffect(() => {
-    if (!isConnected) return;
+    if (!isConnected || !socket || !currentVPS) return;
     loadStaticData();
     fetchChecklist();
     loadServiceHealth();
+    fetchHistoryData();
 
+    let isMonitoring = false;
 
-    // Listen to real-time socket updates
-    if (socket && currentVPS) {
-      socket.emit('monitor:start', currentVPS);
-
-      socket.on('monitor:data', (data) => {
-        if (data.cpu) {
-          setCpu(Math.round(data.cpu.usage));
-          setCpuInfo({
-            cores: `${data.cpu.cores} Cores`,
-            speed: data.cpu.model || ''
-          });
-        }
-        if (data.memory) {
-          const usagePercent = Math.round(data.memory.usage);
-          const totalGB = (data.memory.total / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
-          const usedGB = (data.memory.used / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
-          setRam({ usage: usagePercent, total: totalGB, used: usedGB });
-        }
-        if (data.disk) {
-          const usagePercent = Math.round(data.disk.usage);
-          setDisk({ 
-            usage: usagePercent, 
-            total: data.disk.total || 'Đang tải...', 
-            used: data.disk.used || 'Đang tải...' 
-          });
-        }
-        if (data.uptime) {
-          setUptime(formatUptime(data.uptime));
-        }
-      });
-    }
-
-    return () => {
-      if (socket) {
-        socket.emit('monitor:stop');
-        socket.off('monitor:data');
+    const startMonitoring = () => {
+      if (!isMonitoring) {
+        socket.emit('monitor:start', currentVPS);
+        isMonitoring = true;
       }
     };
-  }, [socket, isConnected]);
+
+    const stopMonitoring = () => {
+      if (isMonitoring) {
+        socket.emit('monitor:stop');
+        isMonitoring = false;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        startMonitoring();
+      } else {
+        stopMonitoring();
+      }
+    };
+
+    // Initially start monitoring if tab is active
+    if (document.visibilityState === 'visible') {
+      startMonitoring();
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Listen to real-time socket updates
+    socket.on('monitor:data', (data) => {
+      if (data.cpu) {
+        setCpu(Math.round(data.cpu.usage));
+        setCpuInfo({
+          cores: `${data.cpu.cores} Cores`,
+          speed: data.cpu.model || ''
+        });
+      }
+      if (data.memory) {
+        const usagePercent = Math.round(data.memory.usage);
+        const totalGB = (data.memory.total / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+        const usedGB = (data.memory.used / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+        setRam({ usage: usagePercent, total: totalGB, used: usedGB });
+      }
+      if (data.disk) {
+        const usagePercent = Math.round(data.disk.usage);
+        setDisk({ 
+          usage: usagePercent, 
+          total: data.disk.total || 'Đang tải...', 
+          used: data.disk.used || 'Đang tải...' 
+        });
+      }
+      if (data.uptime) {
+        setUptime(formatUptime(data.uptime));
+      }
+    });
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stopMonitoring();
+      socket.off('monitor:data');
+    };
+  }, [socket, isConnected, currentVPS]);
 
   const formatUptime = (seconds) => {
     const d = Math.floor(seconds / (3600*24));
@@ -275,7 +650,7 @@ export default function Dashboard() {
   return (
     <div className="content-area">
       <Topbar title="TỔNG QUAN HỆ THỐNG">
-        <button className="btn btn-primary" onClick={() => { loadStaticData(); fetchChecklist(); }}>
+        <button className="btn btn-primary" onClick={() => { loadStaticData(); fetchChecklist(); loadServiceHealth(); fetchHistoryData(); }}>
           <RotateCw size={14} /> Làm mới
         </button>
       </Topbar>
@@ -546,6 +921,9 @@ export default function Dashboard() {
           <div className="stat-card-footer">Trạng thái: Hoạt động</div>
         </div>
       </div>
+
+      {/* Resource History Line Chart */}
+      {renderHistoricalChart()}
 
       {/* Service Health Panel (Phase 6) */}
       <div className="card-glass" style={{ padding: '24px' }}>

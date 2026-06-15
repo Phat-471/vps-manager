@@ -73,6 +73,7 @@ export default function WebServer() {
   const [domain, setDomain] = useState('');
   const [path, setPath] = useState('/var/www/html');
   const [type, setType] = useState('php');
+  const [phpVersion, setPhpVersion] = useState('8.2');
   const [proxyPort, setProxyPort] = useState('3000');
   const [antiDdos, setAntiDdos] = useState(false);
   const [blockBots, setBlockBots] = useState(false);
@@ -86,6 +87,7 @@ export default function WebServer() {
     setDomain('');
     setPath('/var/www/html');
     setType('php');
+    setPhpVersion('8.2');
     setProxyPort('3000');
     setAntiDdos(false);
     setBlockBots(false);
@@ -295,6 +297,7 @@ export default function WebServer() {
         domain,
         root: path,
         type,
+        phpVersion: type === 'php' ? phpVersion : '',
         proxyPort: type === 'proxy' ? proxyPort : '',
         antiDdos,
         blockBots
@@ -1419,6 +1422,23 @@ export default function WebServer() {
                     <option value="proxy">Reverse Proxy (Node.js, Python...)</option>
                   </select>
                 </div>
+                {type === 'php' && (
+                  <div className="form-group">
+                    <label>Phiên bản PHP (PHP Version)</label>
+                    <select
+                      value={phpVersion}
+                      onChange={e => setPhpVersion(e.target.value)}
+                      className="input-glass"
+                    >
+                      <option value="7.4">PHP 7.4</option>
+                      <option value="8.0">PHP 8.0</option>
+                      <option value="8.1">PHP 8.1</option>
+                      <option value="8.2">PHP 8.2 (Khuyên dùng)</option>
+                      <option value="8.3">PHP 8.3</option>
+                      <option value="8.4">PHP 8.4</option>
+                    </select>
+                  </div>
+                )}
                 {type === 'proxy' && (
                   <div className="form-group">
                     <label>Proxy Port</label>

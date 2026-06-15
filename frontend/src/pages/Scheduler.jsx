@@ -17,7 +17,8 @@ import {
   FolderPlus, 
   Terminal,
   Save,
-  RotateCcw
+  RotateCcw,
+  Upload
 } from 'lucide-react';
 
 export default function Scheduler() {
@@ -44,6 +45,13 @@ export default function Scheduler() {
   const [useRclone, setUseRclone] = useState(false);
   const [rcloneRemote, setRcloneRemote] = useState('');
   const [rclonePath, setRclonePath] = useState('');
+
+  // Manual Cloud Sync states
+  const [showCloudSyncModal, setShowCloudSyncModal] = useState(false);
+  const [syncFile, setSyncFile] = useState(null);
+  const [syncRemote, setSyncRemote] = useState('');
+  const [syncPath, setSyncPath] = useState('');
+  const [syncingFile, setSyncingFile] = useState(false);
 
   // New Rclone Remote Manager states
   const [remotes, setRemotes] = useState({});
@@ -535,6 +543,39 @@ export default function Scheduler() {
     }
   };
 
+  const handleOpenCloudSyncModal = (file) => {
+    setSyncFile(file);
+    setSyncRemote(Object.keys(remotes)[0] || '');
+    setSyncPath('');
+    setShowCloudSyncModal(true);
+  };
+
+  const handleCloudSyncSubmit = async (e) => {
+    e.preventDefault();
+    if (!syncFile || !syncRemote) {
+      showToast('Vui lòng cấu hình và chọn Remote đám mây', 'warning');
+      return;
+    }
+    setSyncingFile(true);
+    showToast(`Đang đẩy tệp ${syncFile.filename} lên Cloud (${syncRemote})...`, 'info');
+    try {
+      const res = await apiCall('/api/backups/rclone/sync-file', 'POST', {
+        vpsConfig: currentVPS,
+        filename: syncFile.filename,
+        rcloneRemote: syncRemote,
+        rclonePath: syncPath
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        setShowCloudSyncModal(false);
+      }
+    } catch (err) {
+      showToast('Đồng bộ lên Cloud thất bại: ' + err.message, 'error');
+    } finally {
+      setSyncingFile(false);
+    }
+  };
+
   const handleOpenRestore = (backup) => {
     setSelectedBackup(backup);
     setCleanTarget(false);
@@ -862,6 +903,15 @@ export default function Scheduler() {
                             >
                               <RotateCcw size={12} /> Khôi phục
                             </button>
+                            {rcloneStatus.installed && Object.keys(remotes).length > 0 && (
+                              <button
+                                onClick={() => handleOpenCloudSyncModal(file)}
+                                className="btn btn-glass btn-sm text-orange-300 flex items-center gap-1"
+                                title="Đẩy bản sao lưu này lên Cloud"
+                              >
+                                <Upload size={12} /> Sync Cloud
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDownloadBackup(file.filename)}
                               className="btn btn-glass btn-sm text-indigo-300"
@@ -1304,15 +1354,24 @@ export default function Scheduler() {
                   <div className="space-y-2 pt-1.5" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div className="space-y-1">
                       <label className="text-gray-400 font-medium text-xs">Tên Remote Rclone:</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="vd: gdrive"
-                        value={rcloneRemote}
-                        onChange={(e) => setRcloneRemote(e.target.value)}
-                        className="input-glass w-full"
-                        style={{ padding: '6px', fontSize: '12px' }}
-                      />
+                      {Object.keys(remotes).length > 0 ? (
+                        <select
+                          required
+                          value={rcloneRemote}
+                          onChange={(e) => setRcloneRemote(e.target.value)}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        >
+                          <option value="">-- Chọn Remote --</option>
+                          {Object.keys(remotes).map(name => (
+                            <option key={name} value={name}>{name} ({remotes[name].type})</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <div className="text-[10px] text-red-400 font-semibold bg-red-500/10 border border-red-500/20 p-2 rounded">
+                          Chưa thiết lập Cloud Remote nào bên dưới!
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-1">
                       <label className="text-gray-400 font-medium text-xs">Thư mục đích trên Cloud:</label>
@@ -1806,6 +1865,75 @@ export default function Scheduler() {
                   className="btn btn-primary flex items-center gap-2"
                 >
                   <Save size={16} /> Lưu cấu hình
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: Cloud Sync Backup File */}
+      {showCloudSyncModal && syncFile && (
+        <div className="modal-overlay animate-fadeIn">
+          <div className="modal-content card-glass p-6 max-w-sm w-full rounded-xl space-y-4 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-white/10 pb-3" style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '12px' }}>
+              <h2 className="text-lg font-bold text-gray-200 flex items-center gap-2">
+                <Upload size={18} className="text-orange-400 animate-pulse" />
+                Đồng bộ Cloud thủ công
+              </h2>
+              <button onClick={() => setShowCloudSyncModal(false)} className="text-gray-400 hover:text-white" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="text-xs text-gray-300 leading-relaxed space-y-1">
+              <span>Bạn đang đồng bộ tệp:</span>
+              <strong className="text-indigo-300 font-mono block break-all bg-black/30 p-2 rounded border border-white/5">{syncFile.filename}</strong>
+            </div>
+
+            <form onSubmit={handleCloudSyncSubmit} className="space-y-4 text-sm">
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium text-xs">Chọn Cloud Remote:</label>
+                <select
+                  required
+                  value={syncRemote}
+                  onChange={(e) => setSyncRemote(e.target.value)}
+                  className="input-glass w-full text-xs"
+                  style={{ padding: '8px' }}
+                >
+                  {Object.keys(remotes).map(name => (
+                    <option key={name} value={name}>{name} ({remotes[name].type})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium text-xs">Thư mục đích trên Cloud (Tùy chọn):</label>
+                <input
+                  type="text"
+                  placeholder="vd: /backups/site-home"
+                  value={syncPath}
+                  onChange={(e) => setSyncPath(e.target.value)}
+                  className="input-glass w-full text-xs"
+                  style={{ padding: '8px' }}
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-white/5" style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowCloudSyncModal(false)}
+                  className="btn btn-secondary btn-sm"
+                  disabled={syncingFile}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm flex items-center gap-2"
+                  disabled={syncingFile}
+                >
+                  <Upload size={14} /> {syncingFile ? 'Đang đồng bộ...' : 'Đẩy lên Cloud'}
                 </button>
               </div>
             </form>

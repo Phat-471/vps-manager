@@ -37,6 +37,15 @@ async function getNodeStatus(req, res) {
             else
                 echo "NVM_INSTALLED:false"
             fi
+
+            # Check if PM2 is installed
+            if command -v pm2 &>/dev/null; then
+                echo "PM2_INSTALLED:true"
+                echo "PM2_VERSION:$(pm2 --version 2>/dev/null || echo 'unknown')"
+                echo "PM2_STARTUP_ENABLED:$(systemctl is-enabled pm2-pm2user 2>/dev/null || systemctl is-enabled pm2-root 2>/dev/null || echo 'disabled')"
+            else
+                echo "PM2_INSTALLED:false"
+            fi
         `;
 
         const result = await ssh.executeCommand(script);
@@ -45,7 +54,10 @@ async function getNodeStatus(req, res) {
             nvmInstalled: false,
             nvmVersion: '',
             nodeVersion: '',
-            npmVersion: ''
+            npmVersion: '',
+            pm2Installed: false,
+            pm2Version: '',
+            pm2StartupEnabled: false
         };
 
         lines.forEach(line => {
@@ -57,6 +69,13 @@ async function getNodeStatus(req, res) {
                 status.nodeVersion = line.replace('NODE_VERSION:', '').trim();
             } else if (line.startsWith('NPM_VERSION:')) {
                 status.npmVersion = line.replace('NPM_VERSION:', '').trim();
+            } else if (line.startsWith('PM2_INSTALLED:')) {
+                status.pm2Installed = line.replace('PM2_INSTALLED:', '').trim() === 'true';
+            } else if (line.startsWith('PM2_VERSION:')) {
+                status.pm2Version = line.replace('PM2_VERSION:', '').trim();
+            } else if (line.startsWith('PM2_STARTUP_ENABLED:')) {
+                const val = line.replace('PM2_STARTUP_ENABLED:', '').trim();
+                status.pm2StartupEnabled = val === 'enabled';
             }
         });
 
@@ -318,11 +337,72 @@ async function uninstallNodeVersion(req, res) {
     }
 }
 
+async function setupPM2Startup(req, res) {
+    try {
+        const { vpsConfig, action } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        let script = '';
+        if (action === 'enable') {
+            script = `
+                # Cấu hình PM2 startup cho pm2user và root
+                if id -u pm2user &>/dev/null; then
+                    pm2 startup systemd -u pm2user --hp /home/pm2user || true
+                    sudo -u pm2user pm2 save --force || true
+                else
+                    pm2 startup systemd || true
+                    pm2 save --force || true
+                fi
+                systemctl daemon-reload
+                
+                # Enable và Start service
+                SERVICE_NAME=$(systemctl list-unit-files | grep pm2- | awk '{print $1}' | head -1)
+                if [ -n "$SERVICE_NAME" ]; then
+                    systemctl enable $SERVICE_NAME
+                    systemctl start $SERVICE_NAME
+                    echo "SUCCESS:$SERVICE_NAME"
+                else
+                    echo "ERROR_NO_SERVICE"
+                fi
+            `;
+        } else {
+            script = `
+                # Disable và Stop service
+                SERVICE_NAME=$(systemctl list-unit-files | grep pm2- | awk '{print $1}' | head -1)
+                if [ -n "$SERVICE_NAME" ]; then
+                    systemctl disable $SERVICE_NAME
+                    systemctl stop $SERVICE_NAME
+                    rm -f /etc/systemd/system/$SERVICE_NAME
+                    echo "SUCCESS_DISABLED"
+                else
+                    pm2 unstartup 2>/dev/null || true
+                    echo "NO_SERVICE"
+                fi
+                systemctl daemon-reload
+            `;
+        }
+
+        const result = await ssh.executeCommand(script);
+        if (result.code !== 0) {
+            return res.status(500).json({ success: false, error: 'Thao tác PM2 Startup thất bại', details: result.stderr || result.stdout });
+        }
+
+        res.json({
+            success: true,
+            message: action === 'enable' ? 'Đã kích hoạt PM2 tự khởi chạy cùng hệ thống thành công!' : 'Đã hủy PM2 tự khởi chạy thành công!',
+            output: result.stdout.trim()
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getNodeStatus,
     installNVM,
     listNodeVersions,
     installNodeVersion,
     setDefaultNodeVersion,
-    uninstallNodeVersion
+    uninstallNodeVersion,
+    setupPM2Startup
 };

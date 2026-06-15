@@ -260,6 +260,161 @@ async function removeImage(req, res) {
     }
 }
 
+async function listComposeProjects(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        // Find docker-compose files
+        const findCmd = 'find /var/www /root/docker-apps -maxdepth 3 \\( -name "docker-compose.yml" -o -name "docker-compose.yaml" \\) 2>/dev/null';
+        const result = await ssh.executeCommand(findCmd);
+
+        const files = result.stdout.trim().split('\n').filter(l => l);
+        const projects = [];
+
+        for (const file of files) {
+            const parts = file.split('/');
+            const name = parts[parts.length - 2];
+            const dir = parts.slice(0, -1).join('/');
+
+            // Check container status
+            const psCmd = `cd ${dir} && (docker compose ps -a --format "{{.Names}}|{{.State}}|{{.Status}}" 2>/dev/null || docker-compose ps -a --format "{{.Names}}|{{.State}}|{{.Status}}" 2>/dev/null || docker compose ps 2>/dev/null || docker-compose ps 2>/dev/null)`;
+            const psRes = await ssh.executeCommand(psCmd);
+            
+            projects.push({
+                name,
+                configPath: file,
+                dir,
+                status: psRes.stdout.trim() || 'No containers running'
+            });
+        }
+
+        res.json({ success: true, data: projects });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function getComposeConfig(req, res) {
+    try {
+        const { vpsConfig, configPath } = req.body;
+        if (!configPath) {
+            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn file cấu hình' });
+        }
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const result = await ssh.executeCommand(`cat ${escapeShellArg(configPath)}`);
+        res.json({ success: true, data: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function saveComposeConfig(req, res) {
+    try {
+        const { vpsConfig, projectName, configPath, configContent } = req.body;
+        
+        let targetFile = configPath;
+        let targetDir = '';
+
+        if (!targetFile) {
+            const safeName = sanitizeAlphaNum(projectName);
+            if (!safeName) {
+                return res.status(400).json({ success: false, error: 'Tên dự án không hợp lệ' });
+            }
+            targetDir = `/var/www/docker-apps/${safeName}`;
+            targetFile = `${targetDir}/docker-compose.yml`;
+        } else {
+            targetDir = targetFile.split('/').slice(0, -1).join('/');
+        }
+
+        const base64Content = Buffer.from(configContent).toString('base64');
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const script = `
+            mkdir -p ${targetDir}
+            echo "${base64Content}" | base64 -d > ${targetFile}
+        `;
+
+        const result = await ssh.executeCommand(script);
+        if (result.code !== 0) {
+            return res.status(500).json({ success: false, error: 'Lưu file cấu hình thất bại', details: result.stderr });
+        }
+
+        res.json({
+            success: true,
+            message: 'Đã lưu file cấu hình thành công!',
+            data: {
+                name: projectName || targetFile.split('/').slice(-2, -1)[0],
+                configPath: targetFile,
+                dir: targetDir
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function prepareComposeCmd(req, res) {
+    try {
+        const { vpsConfig, dir, cmd } = req.body;
+        if (!dir) {
+            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn thư mục dự án' });
+        }
+
+        const allowedCmds = ['up', 'down', 'restart', 'logs'];
+        if (!allowedCmds.includes(cmd)) {
+            return res.status(400).json({ success: false, error: 'Lệnh Compose không hợp lệ' });
+        }
+
+        let composeCmd = '';
+        if (cmd === 'up') {
+            composeCmd = 'docker compose up -d || docker-compose up -d';
+        } else if (cmd === 'down') {
+            composeCmd = 'docker compose down || docker-compose down';
+        } else if (cmd === 'restart') {
+            composeCmd = 'docker compose restart || docker-compose restart';
+        } else if (cmd === 'logs') {
+            composeCmd = 'docker compose logs --tail=100 -f || docker-compose logs --tail=100 -f';
+        }
+
+        const command = `
+            cd ${escapeShellArg(dir)}
+            echo ">> Thực thi: ${composeCmd} trong thư mục ${escapeShellArg(dir)}..."
+            ${composeCmd}
+        `;
+
+        res.json({
+            success: true,
+            command: command.trim()
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function deleteComposeProject(req, res) {
+    try {
+        const { vpsConfig, dir } = req.body;
+        if (!dir || dir === '/' || dir === '/var/www' || dir === '/root') {
+            return res.status(400).json({ success: false, error: 'Thư mục không hợp lệ hoặc không an toàn để xóa' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        // Stop containers first
+        await ssh.executeCommand(`cd ${escapeShellArg(dir)} && (docker compose down || docker-compose down)`);
+        // Remove directory
+        const result = await ssh.executeCommand(`rm -rf ${escapeShellArg(dir)}`);
+
+        if (result.code !== 0) {
+            return res.status(500).json({ success: false, error: 'Xóa thư mục dự án thất bại', details: result.stderr });
+        }
+
+        res.json({ success: true, message: 'Đã xóa dự án Docker Compose thành công!' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listContainers,
     startContainer,
@@ -271,5 +426,10 @@ module.exports = {
     deployContainer,
     listImages,
     pullImage,
-    removeImage
+    removeImage,
+    listComposeProjects,
+    getComposeConfig,
+    saveComposeConfig,
+    prepareComposeCmd,
+    deleteComposeProject
 };

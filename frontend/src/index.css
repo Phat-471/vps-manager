@@ -1668,6 +1668,75 @@ body::before {
   50% { opacity: .5; }
 }
 
+/* ==========================================================================
+   SIDEBAR SUBMENU & NESTED NAVIGATION SYSTEM
+   ========================================================================== */
+.sidebar-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin-top: 14px;
+  margin-bottom: 4px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.sidebar-group-header:hover {
+  color: var(--text-bright);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-group-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-subitem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-left: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.sidebar-subitem:hover {
+  color: var(--text-bright);
+  background: rgba(255, 255, 255, 0.03);
+  transform: translateX(4px);
+}
+
+.sidebar-subitem.active {
+  color: var(--text-bright);
+  background: rgba(168, 85, 247, 0.12);
+  border-color: rgba(168, 85, 247, 0.2);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.1);
+}
+
+.sidebar-subitem.active svg {
+  color: var(--primary);
+  filter: drop-shadow(0 0 4px var(--primary-glow));
+}
+
+
 
 
 

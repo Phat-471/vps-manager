@@ -393,8 +393,15 @@ EOF
         command: `
             echo "=== CÀI ĐẶT SCRIPT CHỐNG DDOS DEFLATE CHẠY NGẦM ==="
             if ! command -v ufw >/dev/null; then
-                echo "Lỗi: Vui lòng cài đặt và bật tường lửa UFW trước trong mục Bảo mật."
-                exit 1
+                echo ">> Chưa tìm thấy UFW. Tiến hành cài đặt..."
+                if [ -f /etc/debian_version ]; then
+                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ufw
+                else
+                    yum install -y epel-release && yum install -y ufw
+                fi
+                # Mở cổng SSH mặc định để tránh bị chặn
+                ufw allow 22/tcp
+                echo "y" | ufw enable
             fi
 
             # Tạo script ddos-deflate cục bộ
@@ -506,7 +513,30 @@ async function runScript(req, res) {
         let command = script.command;
         if (args) {
             for (const [key, value] of Object.entries(args)) {
-                command = command.replace(new RegExp(`{{${key.toUpperCase()}}}`, 'g'), value);
+                const upperKey = key.toUpperCase();
+                let escapedValue = String(value || '');
+
+                // Apply strict sanitization and validation per key type to prevent Shell Command Injection
+                if (upperKey === 'DOMAIN') {
+                    escapedValue = escapedValue.replace(/[^a-zA-Z0-9.-]/g, '');
+                } else if (upperKey === 'PORT') {
+                    escapedValue = escapedValue.replace(/[^0-9]/g, '');
+                } else if (upperKey === 'APP_NAME') {
+                    escapedValue = escapedValue.replace(/[^a-zA-Z0-9_-]/g, '-');
+                } else if (upperKey === 'ADMIN_EMAIL') {
+                    escapedValue = escapedValue.replace(/[^a-zA-Z0-9_.@+-]/g, '');
+                } else if (upperKey === 'GIT_URL') {
+                    escapedValue = escapedValue.replace(/[^a-zA-Z0-9_.:/+-@]/g, '');
+                } else {
+                    // Escape characters with special meaning inside double quotes in Bash: \, $, ", `
+                    escapedValue = escapedValue
+                        .replace(/\\/g, '\\\\')
+                        .replace(/\$/g, '\\$')
+                        .replace(/"/g, '\\"')
+                        .replace(/`/g, '\\`');
+                }
+
+                command = command.replace(new RegExp(`{{${upperKey}}}`, 'g'), escapedValue);
             }
         }
 

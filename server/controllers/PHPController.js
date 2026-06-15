@@ -347,6 +347,103 @@ async function setDefaultPHPVersion(req, res) {
     }
 }
 
+async function getRawPHPConfig(req, res) {
+    try {
+        const { vpsConfig, version } = req.body;
+        const targetVersion = version ? sanitizeAlphaNum(version) : '';
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const script = `
+            VERSION="${targetVersion}"
+            if [ -z "$VERSION" ]; then
+                VERSION=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null)
+            fi
+            
+            if [ -z "$VERSION" ]; then
+                echo "ERROR: PHP is not installed"
+                exit 1
+            fi
+            
+            # Detect php.ini path
+            INI_PATH=""
+            if [ -f "/etc/php/$VERSION/fpm/php.ini" ]; then
+                INI_PATH="/etc/php/$VERSION/fpm/php.ini"
+            elif [ -f "/etc/php.ini" ]; then
+                INI_PATH="/etc/php.ini"
+            else
+                INI_PATH=$(php -r "echo php_ini_loaded_file();" 2>/dev/null)
+            fi
+
+            if [ -z "$INI_PATH" ] || [ ! -f "$INI_PATH" ]; then
+                echo "ERROR: php.ini not found"
+                exit 1
+            fi
+
+            echo "PATH:$INI_PATH"
+            echo "---CONTENT_START---"
+            cat "$INI_PATH"
+        `;
+
+        const result = await ssh.executeCommand(script);
+        if (result.stdout.includes('ERROR:')) {
+            return res.status(404).json({ success: false, error: result.stdout.trim() });
+        }
+
+        const output = result.stdout;
+        const pathLine = output.split('\n').find(l => l.startsWith('PATH:'));
+        const iniPath = pathLine ? pathLine.replace('PATH:', '').trim() : '';
+        
+        const contentStartIndex = output.indexOf('---CONTENT_START---');
+        const content = contentStartIndex !== -1 
+            ? output.substring(contentStartIndex + '---CONTENT_START---'.length + 1)
+            : '';
+
+        res.json({
+            success: true,
+            data: {
+                path: iniPath,
+                content: content
+            }
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function saveRawPHPConfig(req, res) {
+    try {
+        const { vpsConfig, path: iniPath, content } = req.body;
+
+        if (!iniPath) {
+            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn php.ini' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        
+        // Write the raw content to the php.ini path on the server
+        await ssh.writeFile(iniPath, content);
+
+        // Restart PHP-FPM service (extract version from path, e.g. /etc/php/8.2/fpm/php.ini)
+        const match = iniPath.match(/\/php\/([\d.]+)\/fpm/);
+        const version = match ? match[1] : '';
+        
+        const restartCmd = version
+            ? `systemctl restart php${version}-fpm 2>/dev/null || systemctl restart php-fpm 2>/dev/null`
+            : `systemctl restart php-fpm 2>/dev/null`;
+            
+        await ssh.executeCommand(restartCmd);
+
+        res.json({
+            success: true,
+            message: 'Đã lưu cấu hình php.ini và khởi động lại dịch vụ PHP-FPM thành công!'
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getPHPConfig,
     savePHPConfig,
@@ -354,5 +451,7 @@ module.exports = {
     installPHPExtension,
     listPHPVersions,
     installPHPVersion,
-    setDefaultPHPVersion
+    setDefaultPHPVersion,
+    getRawPHPConfig,
+    saveRawPHPConfig
 };

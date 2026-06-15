@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { connectionPool } = require('../utils/ssh');
 const { escapeShellArg } = require('../utils/security');
 
@@ -211,7 +213,39 @@ async function getTrafficStats(req, res) {
     }
 }
 
+async function getHistoricalStats(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        if (!vpsConfig || !vpsConfig.id) {
+            return res.status(400).json({
+                success: false,
+                error: 'Thiếu cấu hình VPS hoặc ID VPS'
+            });
+        }
+
+        const historyFile = path.join(__dirname, `../data/vps_history_${vpsConfig.id}.json`);
+        let history = [];
+
+        if (fs.existsSync(historyFile)) {
+            const raw = fs.readFileSync(historyFile, 'utf8');
+            try {
+                history = JSON.parse(raw);
+            } catch (e) {
+                history = [];
+            }
+        }
+
+        res.json({
+            success: true,
+            data: history
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listLogFiles,
-    getTrafficStats
+    getTrafficStats,
+    getHistoricalStats
 };

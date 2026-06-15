@@ -1,6 +1,10 @@
 const { connectionPool } = require('../utils/ssh');
 
-const activeMonitors = new Map();
+// Maps vpsId -> { interval, sockets: Set(socket), lastData, lastFetchTime, fetching }
+const activeVpsMonitors = new Map();
+
+// Maps socketId -> vpsId
+const socketToVpsMap = new Map();
 
 /**
  * Start monitoring
@@ -13,10 +17,14 @@ function start(socket, vpsConfig) {
     }
 
     const socketId = socket.id;
+    const vpsId = vpsConfig.id;
 
-    if (activeMonitors.has(socketId)) {
+    // If socket is already monitoring something, stop it first
+    if (socketToVpsMap.has(socketId)) {
         stop(socket);
     }
+
+    socketToVpsMap.set(socketId, vpsId);
 
     // Command to fetch stats in one go
     const cmd = `
@@ -39,12 +47,47 @@ echo "DISK_PCT:\$disk_pct"
 echo "UPTIME:\$uptime_sec"
 `;
 
-    // Monitor interval
-    const interval = setInterval(async () => {
+    // Ensure state map has the entry for this VPS
+    if (!activeVpsMonitors.has(vpsId)) {
+        const monitorState = {
+            sockets: new Set(),
+            interval: null,
+            lastData: null,
+            lastFetchTime: 0,
+            fetching: false
+        };
+        activeVpsMonitors.set(vpsId, monitorState);
+    }
+
+    const state = activeVpsMonitors.get(vpsId);
+    state.sockets.add(socket);
+
+    // If cached data is fresh (less than 4.5 seconds old), push it immediately to this socket
+    const CACHE_TTL_MS = 4500;
+    const now = Date.now();
+    if (state.lastData && (now - state.lastFetchTime < CACHE_TTL_MS)) {
+        socket.emit('monitor:data', state.lastData);
+    }
+
+    const fetchStats = async () => {
+        if (state.fetching) return;
+        state.fetching = true;
+
         try {
-            const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
-            const result = await ssh.executeCommand(cmd);
-            const output = result.stdout;
+            const isLocal = vpsConfig.host === 'localhost' || vpsConfig.host === '127.0.0.1' || vpsConfig.host === '0.0.0.0';
+            let output = '';
+
+            if (isLocal) {
+                const { exec } = require('child_process');
+                const util = require('util');
+                const execPromise = util.promisify(exec);
+                const { stdout } = await execPromise(cmd);
+                output = stdout;
+            } else {
+                const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+                const result = await ssh.executeCommand(cmd);
+                output = result.stdout;
+            }
 
             // Parse output lines
             const stats = {};
@@ -67,8 +110,7 @@ echo "UPTIME:\$uptime_sec"
             const diskPct = parseFloat(stats['DISK_PCT']) || 0;
             const uptimeSec = parseInt(stats['UPTIME']) || 0;
 
-            // Send to client
-            socket.emit('monitor:data', {
+            const data = {
                 timestamp: Date.now(),
                 cpu: {
                     usage: cpuUsage,
@@ -86,16 +128,33 @@ echo "UPTIME:\$uptime_sec"
                     used: diskUsed
                 },
                 uptime: uptimeSec
-            });
+            };
+
+            state.lastData = data;
+            state.lastFetchTime = Date.now();
+
+            // Broadcast to all sockets subscribed to this VPS
+            for (const s of state.sockets) {
+                s.emit('monitor:data', data);
+            }
 
         } catch (err) {
-            socket.emit('monitor:error', {
-                error: err.message
-            });
+            console.error(`[Monitor] Error fetching stats for VPS ${vpsId}:`, err.message);
+            for (const s of state.sockets) {
+                s.emit('monitor:error', { error: err.message });
+            }
+        } finally {
+            state.fetching = false;
         }
-    }, 2000); // Update every 2 seconds
+    };
 
-    activeMonitors.set(socketId, interval);
+    // If there is no active interval, start one
+    if (!state.interval) {
+        // Fetch immediately on startup
+        fetchStats();
+        // Set up 5-second updates (5000ms)
+        state.interval = setInterval(fetchStats, 5000);
+    }
 }
 
 /**
@@ -103,10 +162,21 @@ echo "UPTIME:\$uptime_sec"
  */
 function stop(socket) {
     const socketId = socket.id;
+    const vpsId = socketToVpsMap.get(socketId);
 
-    if (activeMonitors.has(socketId)) {
-        clearInterval(activeMonitors.get(socketId));
-        activeMonitors.delete(socketId);
+    if (vpsId) {
+        socketToVpsMap.delete(socketId);
+        const state = activeVpsMonitors.get(vpsId);
+        if (state) {
+            state.sockets.delete(socket);
+            // If no more sockets are listening to this VPS, clean up resources
+            if (state.sockets.size === 0) {
+                if (state.interval) {
+                    clearInterval(state.interval);
+                }
+                activeVpsMonitors.delete(vpsId);
+            }
+        }
     }
 }
 

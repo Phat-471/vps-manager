@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useVPS } from '../context/VPSContext';
+import Editor from '@monaco-editor/react';
 import { 
   Play, 
   Square, 
@@ -15,17 +16,32 @@ import {
   X, 
   PlusCircle, 
   Settings, 
-  ShieldAlert 
+  ShieldAlert,
+  Edit,
+  Code
 } from 'lucide-react';
 
 export default function Docker() {
-  const { apiCall, showToast, isConnected } = useVPS();
-  const [activeTab, setActiveTab] = useState('containers'); // 'containers' | 'images'
+  const { apiCall, showToast, isConnected, socket, currentVPS } = useVPS();
+  const [activeTab, setActiveTab] = useState('containers'); // 'containers' | 'images' | 'compose'
   const [containers, setContainers] = useState([]);
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [imagesLoading, setImagesLoading] = useState(false);
   const [hasDocker, setHasDocker] = useState(true);
+
+  // Docker Compose Stacks States
+  const [composeProjects, setComposeProjects] = useState([]);
+  const [composeLoading, setComposeLoading] = useState(false);
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [showEditor, setShowEditor] = useState(false);
+  const [editorContent, setEditorContent] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+
+  // Live Operation Task Overlay
+  const [taskRunning, setTaskRunning] = useState(false);
+  const [taskLogs, setTaskLogs] = useState('');
+  const [showTaskModal, setShowTaskModal] = useState(false);
 
   // Logs modal state
   const [selectedContainerLogs, setSelectedContainerLogs] = useState(null);
@@ -49,6 +65,149 @@ export default function Docker() {
   const [pullImageName, setPullImageName] = useState('');
   const [pullLoading, setPullLoading] = useState(false);
 
+  const fetchComposeProjects = async () => {
+    setComposeLoading(true);
+    try {
+      const res = await apiCall('/api/docker/compose/list', 'POST');
+      if (res.success) {
+        setComposeProjects(res.data || []);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Không thể tải danh sách dự án Docker Compose', 'error');
+    } finally {
+      setComposeLoading(false);
+    }
+  };
+
+  const openEditor = async (project = null) => {
+    setSelectedProject(project);
+    setShowEditor(true);
+    if (project) {
+      setNewProjectName(project.name);
+      setLoading(true);
+      try {
+        const res = await apiCall('/api/docker/compose/config', 'POST', {
+          configPath: project.configPath
+        });
+        if (res.success) {
+          setEditorContent(res.data || '');
+        }
+      } catch (err) {
+        showToast('Không thể tải file cấu hình', 'error');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setNewProjectName('');
+      setEditorContent(`version: '3.8'
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    restart: always
+`);
+    }
+  };
+
+  const handleSaveCompose = async () => {
+    if (!newProjectName.trim()) {
+      showToast('Vui lòng điền tên dự án', 'warning');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await apiCall('/api/docker/compose/save', 'POST', {
+        projectName: newProjectName.trim(),
+        configPath: selectedProject?.configPath || null,
+        configContent: editorContent
+      });
+
+      if (res.success) {
+        showToast(res.message, 'success');
+        setShowEditor(false);
+        fetchComposeProjects();
+      }
+    } catch (err) {
+      showToast('Lỗi lưu cấu hình: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runComposeOperation = async (dir, cmd) => {
+    setTaskLogs(`>> [${new Date().toLocaleTimeString()}] Đang chuẩn bị chạy lệnh: docker compose ${cmd}...\n`);
+    setTaskRunning(true);
+    setShowTaskModal(true);
+
+    try {
+      const res = await apiCall('/api/docker/compose/prepare-cmd', 'POST', {
+        dir,
+        cmd
+      });
+
+      if (res.success) {
+        socket.emit('task:run', {
+          vpsConfig: currentVPS,
+          command: res.command
+        });
+      }
+    } catch (err) {
+      setTaskLogs(prev => prev + `>> THẤT BẠI: ${err.response?.data?.error || err.message}\n`);
+      setTaskRunning(false);
+    }
+  };
+
+  const handleDeleteCompose = async (project) => {
+    if (!window.confirm(`CẢNH BÁO: Thao tác này sẽ dừng toàn bộ containers của dự án "${project.name}" và XÓA HOÀN TOÀN thư mục ${project.dir}. Bạn có chắc chắn?`)) return;
+    setLoading(true);
+    try {
+      const res = await apiCall('/api/docker/compose/delete', 'POST', {
+        dir: project.dir
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        fetchComposeProjects();
+      }
+    } catch (err) {
+      showToast('Lỗi khi xóa dự án: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle Socket Events for task stream
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleOutput = (data) => {
+      setTaskLogs(prev => prev + data);
+    };
+
+    const handleEnded = ({ code, error }) => {
+      setTaskRunning(false);
+      if (code === 0) {
+        setTaskLogs(prev => prev + `\n>> [${new Date().toLocaleTimeString()}] THỰC THI THÀNH CÔNG.\n`);
+        showToast('Thực thi kịch bản Compose thành công!', 'success');
+        fetchComposeProjects();
+      } else {
+        const errMsg = error || `Mã lỗi trả về: ${code}`;
+        setTaskLogs(prev => prev + `\n>> [${new Date().toLocaleTimeString()}] THẤT BẠI: ${errMsg}\n`);
+        showToast('Thực thi Compose thất bại: ' + errMsg, 'error');
+      }
+    };
+
+    socket.on('task:output', handleOutput);
+    socket.on('task:ended', handleEnded);
+
+    return () => {
+      socket.off('task:output', handleOutput);
+      socket.off('task:ended', handleEnded);
+    };
+  }, [socket]);
+
   useEffect(() => {
     if (isConnected) {
       fetchData();
@@ -58,8 +217,10 @@ export default function Docker() {
   const fetchData = () => {
     if (activeTab === 'containers') {
       fetchContainers();
-    } else {
+    } else if (activeTab === 'images') {
       fetchImages();
+    } else if (activeTab === 'compose') {
+      fetchComposeProjects();
     }
   };
 
@@ -262,26 +423,37 @@ export default function Docker() {
         <div className="explorer-toolbar">
           {hasDocker && (
             <>
-              <button
-                onClick={() => setShowPullModal(true)}
-                className="btn btn-glass text-indigo-300"
-              >
-                <Download size={14} /> Pull Image
-              </button>
-              <button
-                onClick={() => setShowDeployModal(true)}
-                className="btn btn-primary"
-              >
-                <Plus size={14} /> Triển khai Container
-              </button>
+              {activeTab === 'compose' ? (
+                <button
+                  onClick={() => openEditor(null)}
+                  className="btn btn-primary"
+                >
+                  <Plus size={14} /> Tạo Dự Án Compose
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setShowPullModal(true)}
+                    className="btn btn-glass text-indigo-300"
+                  >
+                    <Download size={14} /> Pull Image
+                  </button>
+                  <button
+                    onClick={() => setShowDeployModal(true)}
+                    className="btn btn-primary"
+                  >
+                    <Plus size={14} /> Triển khai Container
+                  </button>
+                </>
+              )}
             </>
           )}
           <button
             onClick={fetchData}
-            disabled={loading || imagesLoading}
+            disabled={loading || imagesLoading || composeLoading}
             className="btn btn-glass"
           >
-            <RefreshCw size={14} className={(loading || imagesLoading) ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={(loading || imagesLoading || composeLoading) ? 'animate-spin' : ''} />
             Làm mới
           </button>
         </div>
@@ -302,6 +474,13 @@ export default function Docker() {
         >
           <ImageIcon size={16} />
           Docker Images ({images.length})
+        </button>
+        <button 
+          className={`db-tab-item ${activeTab === 'compose' ? 'active' : ''}`}
+          onClick={() => setActiveTab('compose')}
+        >
+          <Layers size={16} className="text-purple-400" />
+          Docker Compose ({composeProjects.length})
         </button>
       </div>
 
@@ -466,6 +645,109 @@ export default function Docker() {
                                 className="btn btn-glass btn-sm text-red-400"
                               >
                                 <Trash2 size={12} /> Xóa
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: DOCKER COMPOSE STACKS */}
+          {activeTab === 'compose' && (
+            <div className="card-glass overflow-hidden rounded-xl">
+              {composeLoading ? (
+                <div className="text-center py-12 text-gray-400">
+                  <RefreshCw size={24} className="animate-spin mx-auto mb-2 text-indigo-500" />
+                  Đang tải danh sách các dự án Docker Compose...
+                </div>
+              ) : composeProjects.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  Chưa có dự án Docker Compose nào. Hãy nhấn nút "Tạo Dự Án Compose" để bắt đầu!
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="explorer-list-table">
+                    <thead>
+                      <tr>
+                        <th>Tên dự án</th>
+                        <th>Đường dẫn thư mục</th>
+                        <th>File cấu hình</th>
+                        <th>Containers liên kết</th>
+                        <th style={{ textAlign: 'center', width: '320px' }}>Hành động</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {composeProjects.map((p) => (
+                        <tr key={p.configPath}>
+                          <td>
+                            <div className="explorer-list-name-col">
+                              <Layers size={16} className="text-purple-400 shrink-0" />
+                              <span className="font-semibold text-gray-200">{p.name}</span>
+                            </div>
+                          </td>
+                          <td className="font-mono text-xs text-gray-400 max-w-[200px] truncate" title={p.dir}>
+                            {p.dir}
+                          </td>
+                          <td className="font-mono text-xs text-gray-400">
+                            docker-compose.yml
+                          </td>
+                          <td className="font-mono text-xs text-gray-400 max-w-[200px] truncate" title={p.status}>
+                            {p.status}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                              <button
+                                onClick={() => runComposeOperation(p.dir, 'up')}
+                                className="btn btn-glass btn-sm text-green-400"
+                                title="Khởi chạy Stack (up -d)"
+                                style={{ padding: '6px 8px' }}
+                              >
+                                <Play size={12} className="inline mr-1" /> Up
+                              </button>
+                              <button
+                                onClick={() => runComposeOperation(p.dir, 'down')}
+                                className="btn btn-glass btn-sm text-yellow-400"
+                                title="Dừng và xóa Stack (down)"
+                                style={{ padding: '6px 8px' }}
+                              >
+                                <Square size={12} className="inline mr-1" /> Down
+                              </button>
+                              <button
+                                onClick={() => runComposeOperation(p.dir, 'restart')}
+                                className="btn btn-glass btn-sm text-blue-400"
+                                title="Khởi động lại Stack (restart)"
+                                style={{ padding: '6px 8px' }}
+                              >
+                                <RotateCw size={12} className="inline mr-1" /> Restart
+                              </button>
+                              <button
+                                onClick={() => runComposeOperation(p.dir, 'logs')}
+                                className="btn btn-glass btn-sm text-indigo-300"
+                                title="Xem live logs"
+                                style={{ padding: '6px 8px' }}
+                              >
+                                <Terminal size={12} className="inline mr-1" /> Logs
+                              </button>
+                              <button
+                                onClick={() => openEditor(p)}
+                                className="btn btn-glass btn-sm text-gray-300"
+                                title="Sửa file docker-compose.yml"
+                                style={{ padding: '6px 8px' }}
+                              >
+                                <Edit size={12} className="inline mr-1" /> Sửa
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCompose(p)}
+                                className="btn btn-glass btn-sm text-red-400"
+                                title="Xóa toàn bộ dự án"
+                                style={{ padding: '6px' }}
+                              >
+                                <Trash2 size={12} />
                               </button>
                             </div>
                           </td>
@@ -771,6 +1053,114 @@ export default function Docker() {
             <div className="modal-footer">
               <button
                 onClick={() => setSelectedContainerLogs(null)}
+                className="btn btn-glass"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Monaco Compose Editor Modal */}
+      {showEditor && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ width: '800px', maxWidth: '95%', display: 'flex', flexDirection: 'column' }}>
+            <div className="modal-header">
+              <h2 className="flex items-center gap-2">
+                <Code size={18} className="text-purple-400" />
+                {selectedProject ? `Cấu hình Compose: ${newProjectName}` : 'Tạo Dự Án Docker Compose mới'}
+              </h2>
+              <button onClick={() => setShowEditor(false)} className="modal-close-btn">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body space-y-4 flex-1">
+              {!selectedProject && (
+                <div className="form-group">
+                  <label className="text-xs text-gray-400 block mb-1">Tên dự án (Không viết dấu, không khoảng trắng):</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="vd: my-ghost-blog, sample-redis-stack"
+                    value={newProjectName}
+                    onChange={e => setNewProjectName(e.target.value)}
+                    className="input-glass"
+                  />
+                  <small className="text-[10px] text-gray-500 block leading-tight mt-1">Dự án sẽ được lưu tại thư mục <code>/var/www/docker-apps/{newProjectName || 'project-name'}</code></small>
+                </div>
+              )}
+              <div className="form-group flex-1">
+                <label className="text-xs text-gray-400 block mb-2">Định nghĩa YAML (docker-compose.yml):</label>
+                <div className="border border-white/10 rounded-lg overflow-hidden" style={{ minHeight: '350px' }}>
+                  <Editor
+                    height="350px"
+                    defaultLanguage="yaml"
+                    theme="vs-dark"
+                    value={editorContent}
+                    onChange={(val) => setEditorContent(val)}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 12,
+                      wordWrap: 'on'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button 
+                type="button" 
+                className="btn btn-glass" 
+                onClick={() => setShowEditor(false)}
+              >
+                Hủy
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-primary" 
+                onClick={handleSaveCompose}
+                disabled={loading}
+              >
+                {loading ? 'Đang lưu...' : 'Lưu cấu hình'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live Compose Task Log Modal */}
+      {showTaskModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ width: '800px', maxH: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="modal-header">
+              <h3 className="font-semibold text-lg flex items-center gap-2">
+                <Terminal size={18} className="text-purple-400" />
+                Tiến trình thực thi Docker Compose
+              </h3>
+              <button onClick={() => { if (!taskRunning) setShowTaskModal(false); }} className="modal-close-btn" disabled={taskRunning}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body flex-1 overflow-auto bg-black/60 font-mono text-xs text-green-400 p-4 rounded-lg min-h-[350px]" style={{ margin: '16px 20px' }}>
+              <pre className="whitespace-pre-wrap">{taskLogs}</pre>
+            </div>
+            <div className="modal-footer flex gap-2">
+              {taskRunning && socket && (
+                <button
+                  onClick={() => {
+                    socket.emit('task:stop');
+                    setTaskRunning(false);
+                    setTaskLogs(prev => prev + '\n>> [HỦY] Tiến trình bị dừng bởi người dùng.\n');
+                  }}
+                  className="btn btn-danger text-xs font-semibold py-2 px-4 rounded-lg"
+                >
+                  Dừng tiến trình (Kill)
+                </button>
+              )}
+              <button
+                onClick={() => setShowTaskModal(false)}
+                disabled={taskRunning}
                 className="btn btn-glass"
               >
                 Đóng

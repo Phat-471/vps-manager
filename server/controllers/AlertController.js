@@ -324,6 +324,67 @@ async function testDiscord(req, res) {
     }
 }
 
+const historyPath = path.join(__dirname, '../data/alerts_history.json');
+
+function readHistory() {
+    try {
+        if (!fs.existsSync(historyPath)) {
+            return [];
+        }
+        const raw = fs.readFileSync(historyPath, 'utf8');
+        return JSON.parse(raw);
+    } catch (err) {
+        console.error('Error reading alerts_history.json:', err);
+        return [];
+    }
+}
+
+function writeHistory(history) {
+    try {
+        const dir = path.dirname(historyPath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf8');
+        return true;
+    } catch (err) {
+        console.error('Error writing alerts_history.json:', err);
+        return false;
+    }
+}
+
+function logAlertEvent(event) {
+    const history = readHistory();
+    const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).substring(2, 5);
+    const newEvent = {
+        id,
+        timestamp: new Date().toISOString(),
+        ...event
+    };
+    history.unshift(newEvent);
+    const limited = history.slice(0, 200);
+    writeHistory(limited);
+    return newEvent;
+}
+
+async function getAlertHistory(req, res) {
+    try {
+        const history = readHistory();
+        res.json({ success: true, data: history });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function clearAlertHistory(req, res) {
+    try {
+        writeHistory([]);
+        res.json({ success: true, message: 'Đã xóa toàn bộ lịch sử cảnh báo!' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getConfig,
     saveChannels,
@@ -333,5 +394,9 @@ module.exports = {
     readConfig,
     decrypt,
     sendTelegramAlert,
-    sendDiscordAlert
+    sendDiscordAlert,
+    logAlertEvent,
+    getAlertHistory,
+    clearAlertHistory
 };
+

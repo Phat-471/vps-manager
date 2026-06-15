@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useVPS } from '../context/VPSContext';
+import Editor from '@monaco-editor/react';
 import { 
   Folder, 
   File, 
@@ -19,8 +20,51 @@ import {
   Copy, 
   Key, 
   HardDrive, 
-  FolderHeart
+  FolderHeart,
+  Archive
 } from 'lucide-react';
+
+const getEditorLanguage = (fileName) => {
+  if (!fileName) return 'plaintext';
+  const ext = fileName.split('.').pop().toLowerCase();
+  switch (ext) {
+    case 'js':
+    case 'jsx':
+      return 'javascript';
+    case 'ts':
+    case 'tsx':
+      return 'typescript';
+    case 'html':
+    case 'htm':
+      return 'html';
+    case 'css':
+      return 'css';
+    case 'json':
+      return 'json';
+    case 'php':
+      return 'php';
+    case 'py':
+      return 'python';
+    case 'sh':
+    case 'bash':
+      return 'shell';
+    case 'md':
+      return 'markdown';
+    case 'xml':
+      return 'xml';
+    case 'yaml':
+    case 'yml':
+      return 'yaml';
+    case 'sql':
+      return 'sql';
+    case 'conf':
+    case 'ini':
+    case 'htaccess':
+      return 'ini';
+    default:
+      return 'plaintext';
+  }
+};
 
 export default function FileManager() {
   const { apiCall, showToast, currentVPS } = useVPS();
@@ -260,38 +304,52 @@ export default function FileManager() {
   };
 
   const handleUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    await uploadSingleFile(file);
+    const filesList = e.target.files;
+    if (!filesList || filesList.length === 0) return;
+    await uploadMultipleFiles(filesList);
   };
 
-  const uploadSingleFile = async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('remotePath', currentPath);
-    formData.append('vpsConfig', JSON.stringify(currentVPS));
-
+  const uploadMultipleFiles = async (filesList) => {
     setUploading(true);
-    showToast(`Đang upload tệp ${file.name}...`, 'info');
+    let successCount = 0;
+    let failCount = 0;
 
-    try {
-      const response = await fetch('/api/files/upload', {
-        method: 'POST',
-        body: formData
-      });
-      const result = await response.json();
-      if (result.success) {
-        showToast('Upload tệp thành công!', 'success');
-        fetchFiles(currentPath);
-      } else {
-        throw new Error(result.error);
+    for (let i = 0; i < filesList.length; i++) {
+      const file = filesList[i];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('remotePath', currentPath);
+      formData.append('vpsConfig', JSON.stringify(currentVPS));
+
+      showToast(`Đang tải lên (${i + 1}/${filesList.length}): ${file.name}...`, 'info');
+
+      try {
+        const response = await fetch('/api/files/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const result = await response.json();
+        if (result.success) {
+          successCount++;
+        } else {
+          failCount++;
+          showToast(`Lỗi khi tải lên ${file.name}: ${result.error}`, 'error');
+        }
+      } catch (err) {
+        failCount++;
+        showToast(`Lỗi kết nối tải lên ${file.name}: ${err.message}`, 'error');
       }
-    } catch (err) {
-      console.error(err);
-      showToast(`Upload thất bại: ${err.message}`, 'error');
-    } finally {
-      setUploading(false);
     }
+
+    if (successCount > 0) {
+      showToast(`Đã tải lên thành công ${successCount} tệp!`, 'success');
+    }
+    if (failCount > 0) {
+      showToast(`Có ${failCount} tệp tải lên thất bại.`, 'warning');
+    }
+
+    setUploading(false);
+    fetchFiles(currentPath);
   };
 
   const handleDownload = (e, name) => {
@@ -319,6 +377,43 @@ export default function FileManager() {
     document.body.removeChild(form);
   };
 
+  const handleZip = async (e, fileObj) => {
+    if (e) e.stopPropagation();
+    const name = fileObj.name;
+    const sourcePath = currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
+    const defaultZipName = name.includes('.') ? name.substring(0, name.lastIndexOf('.')) + '.zip' : name + '.zip';
+    const zipName = window.prompt(`Nhập tên tệp nén zip:`, defaultZipName);
+    if (!zipName) return;
+
+    const zipPath = currentPath === '/' ? `/${zipName}` : `${currentPath}/${zipName}`;
+
+    showToast(`Đang thực hiện nén ${name}...`, 'info');
+    try {
+      await apiCall('/api/files/zip', 'POST', { sourcePath, zipPath });
+      showToast(`Đã nén thành công thành ${zipName}`, 'success');
+      fetchFiles(currentPath);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUnzip = async (e, fileObj) => {
+    if (e) e.stopPropagation();
+    const name = fileObj.name;
+    const zipPath = currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
+    const destPath = window.prompt(`Nhập đường dẫn giải nén tuyệt đối:`, currentPath);
+    if (!destPath) return;
+
+    showToast(`Đang thực hiện giải nén ${name}...`, 'info');
+    try {
+      await apiCall('/api/files/unzip', 'POST', { zipPath, destPath });
+      showToast(`Đã giải nén thành công tệp ${name}`, 'success');
+      fetchFiles(currentPath);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   // Drag and drop events
   const handleDrag = (e) => {
     e.preventDefault();
@@ -335,9 +430,8 @@ export default function FileManager() {
     e.stopPropagation();
     setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      await uploadSingleFile(file);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      await uploadMultipleFiles(e.dataTransfer.files);
     }
   };
 
@@ -401,7 +495,7 @@ export default function FileManager() {
           <label className="btn btn-glass text-indigo-300 cursor-pointer flex items-center gap-1.5 py-2">
             <Upload size={14} />
             Tải lên
-            <input type="file" onChange={handleUpload} className="hidden" disabled={uploading} />
+            <input type="file" multiple onChange={handleUpload} className="hidden" disabled={uploading} />
           </label>
           <button onClick={() => setShowNewFolder(true)} className="btn btn-glass flex items-center gap-1.5 py-2">
             <Plus size={14} /> Thư mục mới
@@ -454,6 +548,9 @@ export default function FileManager() {
             <div className="flex items-center gap-2">
               <FileCode className="text-indigo-400" size={18} />
               <span className="font-semibold text-sm">{editingFile.name}</span>
+              <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-mono uppercase">
+                {getEditorLanguage(editingFile.name)}
+              </span>
             </div>
             <div className="flex gap-2">
               <button
@@ -466,11 +563,26 @@ export default function FileManager() {
               <button onClick={() => setEditingFile(null)} className="btn btn-glass text-gray-400">Hủy</button>
             </div>
           </div>
-          <textarea
-            value={fileContent}
-            onChange={(e) => setFileContent(e.target.value)}
-            className="w-full min-h-[450px] bg-black/50 text-gray-200 font-mono text-xs p-4 rounded-lg outline-none border border-white/10 focus:border-indigo-500/50 resize-y"
-          />
+          <div className="rounded-lg overflow-hidden border border-white/10" style={{ height: '500px' }}>
+            <Editor
+              height="100%"
+              theme="vs-dark"
+              language={getEditorLanguage(editingFile.name)}
+              value={fileContent}
+              onChange={(value) => setFileContent(value || '')}
+              options={{
+                minimap: { enabled: true },
+                fontSize: 13,
+                automaticLayout: true,
+                wordWrap: 'on',
+                cursorBlinking: 'smooth',
+                scrollbar: {
+                  verticalScrollbarSize: 10,
+                  horizontalScrollbarSize: 10
+                }
+              }}
+            />
+          </div>
         </div>
       )}
 
@@ -734,6 +846,22 @@ export default function FileManager() {
                   >
                     <Edit3 size={12} /> Đổi tên
                   </button>
+
+                  <button
+                    onClick={(e) => handleZip(e, selectedItem)}
+                    className="btn btn-glass btn-sm flex items-center justify-center gap-1.5 text-orange-400"
+                  >
+                    <Archive size={12} /> Nén Zip
+                  </button>
+
+                  {selectedItem.type === 'file' && selectedItem.name.toLowerCase().endsWith('.zip') && (
+                    <button
+                      onClick={(e) => handleUnzip(e, selectedItem)}
+                      className="btn btn-glass btn-sm flex items-center justify-center gap-1.5 text-cyan-400"
+                    >
+                      <Folder size={12} /> Giải nén
+                    </button>
+                  )}
 
                   <button
                     onClick={(e) => handleDelete(e, selectedItem)}

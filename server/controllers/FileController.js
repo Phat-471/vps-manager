@@ -301,6 +301,84 @@ async function copyFile(req, res) {
     }
 }
 
+/**
+ * Zip files/folders
+ */
+async function zipFile(req, res) {
+    try {
+        const { vpsConfig, sourcePath, zipPath } = req.body;
+        if (!sourcePath || !zipPath) {
+            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn nguồn hoặc đường dẫn tệp zip' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            if ! command -v zip >/dev/null 2>&1; then
+                if [ -f /etc/debian_version ]; then
+                    apt-get update && apt-get install -y zip
+                else
+                    yum install -y zip
+                fi
+            fi
+            zip -r ${escapeShellArg(zipPath)} ${escapeShellArg(sourcePath)}
+        `;
+        const result = await ssh.executeCommand(cmd);
+        if (result.code !== 0) {
+            return res.status(500).json({ success: false, error: 'Nén tệp tin thất bại', details: result.stderr || result.stdout });
+        }
+
+        res.json({
+            success: true,
+            message: 'Đã nén tệp tin thành công'
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+}
+
+/**
+ * Unzip file
+ */
+async function unzipFile(req, res) {
+    try {
+        const { vpsConfig, zipPath, destPath } = req.body;
+        if (!zipPath || !destPath) {
+            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn tệp zip hoặc thư mục đích' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            if ! command -v unzip >/dev/null 2>&1; then
+                if [ -f /etc/debian_version ]; then
+                    apt-get update && apt-get install -y unzip
+                else
+                    yum install -y unzip
+                fi
+            fi
+            unzip -o ${escapeShellArg(zipPath)} -d ${escapeShellArg(destPath)}
+        `;
+        const result = await ssh.executeCommand(cmd);
+        if (result.code !== 0) {
+            return res.status(500).json({ success: false, error: 'Giải nén tệp tin thất bại', details: result.stderr || result.stdout });
+        }
+
+        res.json({
+            success: true,
+            message: 'Đã giải nén tệp tin thành công'
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+}
+
 module.exports = {
     listFiles,
     readFile,
@@ -311,5 +389,8 @@ module.exports = {
     chmod,
     uploadFile: [upload.single('file'), uploadFile],
     downloadFile,
-    copyFile
+    copyFile,
+    zipFile,
+    unzipFile
 };
+

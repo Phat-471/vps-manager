@@ -14,4 +14,11 @@ router.post('/images', DockerController.listImages);
 router.post('/pull', DockerController.pullImage);
 router.post('/remove-image', DockerController.removeImage);
 
+// Docker Compose Stacks
+router.post('/compose/list', DockerController.listComposeProjects);
+router.post('/compose/config', DockerController.getComposeConfig);
+router.post('/compose/save', DockerController.saveComposeConfig);
+router.post('/compose/prepare-cmd', DockerController.prepareComposeCmd);
+router.post('/compose/delete', DockerController.deleteComposeProject);
+
 module.exports = router;

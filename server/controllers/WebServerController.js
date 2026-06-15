@@ -48,7 +48,7 @@ async function listSites(req, res) {
 
 async function addSite(req, res) {
     try {
-        const { vpsConfig, domain, root, type, proxyPort, antiDdos = false, blockBots = false } = req.body;
+        const { vpsConfig, domain, root, type, proxyPort, phpVersion, antiDdos = false, blockBots = false } = req.body;
         const safeDomain = sanitizeAlphaNum(domain);
         if (!safeDomain) {
             return res.status(400).json({ success: false, error: 'Domain không hợp lệ' });
@@ -78,6 +78,23 @@ async function addSite(req, res) {
 
         let config = '';
         if (type === 'php') {
+            // Find actual FPM socket dynamically
+            let fpmSock = `/run/php/php${phpVersion || ''}-fpm.sock`;
+            const checkSock = await ssh.executeCommand(`[ -S "${fpmSock}" ] && echo "OK" || echo "NO"`);
+            if (checkSock.stdout.trim() !== 'OK') {
+                const findSock = await ssh.executeCommand('find /run/php/ -name "php*-fpm.sock" | head -1');
+                if (findSock.code === 0 && findSock.stdout.trim()) {
+                    fpmSock = findSock.stdout.trim();
+                } else {
+                    const findSockVar = await ssh.executeCommand('find /var/run/php/ -name "php*-fpm.sock" | head -1');
+                    if (findSockVar.code === 0 && findSockVar.stdout.trim()) {
+                        fpmSock = findSockVar.stdout.trim();
+                    } else {
+                        fpmSock = '/var/run/php/php-fpm.sock'; // Fallback
+                    }
+                }
+            }
+
             config = `
 server {
     listen 80;
@@ -92,7 +109,7 @@ server {
 
     location ~ \\.php$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/var/run/php/php-fpm.sock;
+        fastcgi_pass unix:${fpmSock};
     }
 }`;
         } else if (type === 'proxy') {

@@ -4,6 +4,8 @@ const PHPController = require('../controllers/PHPController');
 
 router.post('/config/get', PHPController.getPHPConfig);
 router.post('/config/save', PHPController.savePHPConfig);
+router.post('/config/raw/get', PHPController.getRawPHPConfig);
+router.post('/config/raw/save', PHPController.saveRawPHPConfig);
 router.post('/extensions/list', PHPController.getPHPExtensions);
 router.post('/extensions/install', PHPController.installPHPExtension);
 router.post('/versions/list', PHPController.listPHPVersions);

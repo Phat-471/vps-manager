@@ -12,16 +12,20 @@ import {
   Check, 
   AlertTriangle,
   Zap,
-  HeartPulse
+  HeartPulse,
+  Trash2
 } from 'lucide-react';
 
 export default function Alerts() {
-  const { apiCall, showToast, currentVPS, isConnected } = useVPS();
+  const { apiCall, showToast, currentVPS, isConnected, socket } = useVPS();
   const [loading, setLoading] = useState(false);
   const [savingChannels, setSavingChannels] = useState(false);
   const [savingThresholds, setSavingThresholds] = useState(false);
   const [testingTelegram, setTestingTelegram] = useState(false);
   const [testingDiscord, setTestingDiscord] = useState(false);
+
+  // Tabs
+  const [activeTab, setActiveTab] = useState('config'); // 'config' | 'history'
 
   // Global channels state
   const [telegramEnabled, setTelegramEnabled] = useState(false);
@@ -39,11 +43,67 @@ export default function Alerts() {
   const [ramLimit, setRamLimit] = useState(90);
   const [diskLimit, setDiskLimit] = useState(90);
 
+  // Alerts History state
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   useEffect(() => {
     if (isConnected) {
       fetchConfig();
     }
   }, [isConnected, currentVPS]);
+
+  useEffect(() => {
+    if (isConnected && activeTab === 'history') {
+      fetchHistory();
+    }
+  }, [isConnected, activeTab]);
+
+  useEffect(() => {
+    if (socket) {
+      const handleAlertEvent = (event) => {
+        setHistory(prev => {
+          if (prev.some(item => item.id === event.id)) return prev;
+          return [event, ...prev].slice(0, 200);
+        });
+        showToast(`Cảnh báo mới từ [${event.host}]: ${event.message}`, event.level === 'success' ? 'success' : 'warning');
+      };
+      
+      socket.on('alert:event', handleAlertEvent);
+      return () => {
+        socket.off('alert:event', handleAlertEvent);
+      };
+    }
+  }, [socket]);
+
+  const fetchHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await apiCall('/api/alerts/history', 'POST');
+      if (res.success) {
+        setHistory(res.data || []);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi tải lịch sử cảnh báo: ' + err.message, 'error');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleClearHistory = async () => {
+    if (!window.confirm('Bạn có chắc chắn muốn xóa toàn bộ nhật ký sự kiện cảnh báo và khôi phục?')) return;
+    try {
+      const res = await apiCall('/api/alerts/history/clear', 'POST');
+      if (res.success) {
+        showToast('Đã xóa lịch sử cảnh báo thành công', 'success');
+        setHistory([]);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi xóa lịch sử: ' + err.message, 'error');
+    }
+  };
 
   const fetchConfig = async () => {
     setLoading(true);
@@ -181,23 +241,40 @@ export default function Alerts() {
         <div className="explorer-header-title">
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2 font-outfit">
             <Bell size={24} className="text-indigo-400" />
-            Cấu hình Cảnh báo VPS
+            Giám sát & Cảnh báo VPS
           </h1>
           <p className="text-sm text-gray-400">
-            Tự động theo dõi tải hệ thống (CPU, RAM, Disk) và gửi cảnh báo quá tải hoặc máy chủ mất kết nối (Downtime) qua Telegram/Discord.
+            Tự động theo dõi tải hệ thống (CPU, RAM, Disk) và tự động khôi phục (Auto-Healing) các dịch vụ bị lỗi.
           </p>
         </div>
       </div>
 
-      {loading ? (
-        <div className="card-glass p-8 text-center text-gray-400">
-          <RefreshCw size={24} className="animate-spin mx-auto mb-2 text-indigo-500" />
-          Đang tải cấu hình cảnh báo...
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+      {/* Tabs */}
+      <div className="db-tabs-container" style={{ marginBottom: '20px' }}>
+        <button 
+          onClick={() => setActiveTab('config')}
+          className={`db-tab-item ${activeTab === 'config' ? 'active' : ''}`}
+        >
+          Cấu hình Cảnh báo
+        </button>
+        <button 
+          onClick={() => setActiveTab('history')}
+          className={`db-tab-item ${activeTab === 'history' ? 'active' : ''}`}
+        >
+          Lịch sử Cảnh báo & Khôi phục
+        </button>
+      </div>
+
+      {activeTab === 'config' && (
+        loading ? (
+          <div className="card-glass p-8 text-center text-gray-400">
+            <RefreshCw size={24} className="animate-spin mx-auto mb-2 text-indigo-500" />
+            Đang tải cấu hình cảnh báo...
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
           
-          {/* CỘT 1: CẤU HÌNH KÊNH THÔNG BÁO (CHANNELS) */}
+          {/* CỘT 1: CẤU HỈNH KÊNH THÔNG BÁO (CHANNELS) */}
           <div className="space-y-6">
             <div className="card-glass p-6 rounded-xl space-y-4">
               <h2 className="text-base font-bold text-gray-200 flex items-center gap-2">
@@ -486,6 +563,85 @@ export default function Alerts() {
             </div>
           </div>
 
+        </div>
+        )
+      )}
+
+      {activeTab === 'history' && (
+        <div className="card-glass p-6 rounded-xl space-y-4">
+          <div className="flex justify-between items-center mb-2" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 className="text-base font-bold text-gray-200 flex items-center gap-2">
+              <ShieldAlert className="text-indigo-400" size={18} />
+              Nhật ký Cảnh báo & Khôi phục (Auto-Healing)
+            </h2>
+            <button
+              onClick={handleClearHistory}
+              disabled={history.length === 0}
+              className="btn btn-danger btn-sm flex items-center gap-1.5 border-none"
+              style={{ fontSize: '12px', padding: '6px 12px' }}
+            >
+              <Trash2 size={12} /> Xóa nhật ký
+            </button>
+          </div>
+
+          {historyLoading ? (
+            <div className="text-center py-12 text-gray-400">
+              <RefreshCw size={24} className="animate-spin mx-auto mb-2 text-indigo-500" />
+              Đang tải lịch sử...
+            </div>
+          ) : history.length === 0 ? (
+            <div className="text-center py-16 text-gray-500 italic">
+              Không có bản ghi lịch sử cảnh báo hoặc khôi phục nào được ghi nhận.
+            </div>
+          ) : (
+            <div className="space-y-3" style={{ maxHeight: '600px', overflowY: 'auto', paddingRight: '4px' }}>
+              {history.map((event) => {
+                let BadgeColor = 'bg-white/5 text-gray-400 border-white/10';
+                let Icon = AlertTriangle;
+                let borderStyle = 'border-white/5';
+
+                if (event.level === 'danger') {
+                  BadgeColor = 'bg-red-500/10 text-red-400 border-red-500/20';
+                  borderStyle = 'border-red-500/10';
+                  if (event.type === 'downtime') {
+                     Icon = ShieldAlert;
+                  }
+                } else if (event.level === 'warning') {
+                  BadgeColor = 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20';
+                  borderStyle = 'border-yellow-500/10';
+                } else if (event.level === 'success') {
+                  BadgeColor = 'bg-green-500/10 text-green-400 border-green-500/20';
+                  borderStyle = 'border-green-500/10';
+                  Icon = Zap;
+                }
+
+                return (
+                  <div
+                    key={event.id}
+                    className={`p-4 bg-white/5 rounded-xl border ${borderStyle} flex items-start justify-between gap-4 hover:bg-white/10 transition-all`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2.5 rounded-lg shrink-0 ${BadgeColor.split(' ')[0]} ${BadgeColor.split(' ')[1]}`}>
+                        <Icon size={18} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-xs text-gray-300 font-mono">[{event.host}]</span>
+                          <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full border ${BadgeColor}`}>
+                            {event.type.toUpperCase()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-300 mt-1.5 leading-relaxed">{event.message}</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-mono shrink-0">
+                      {new Date(event.timestamp).toLocaleString('vi-VN')}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

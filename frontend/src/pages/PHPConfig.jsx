@@ -20,7 +20,7 @@ export default function PHPConfig() {
   const [installingId, setInstallingId] = useState(null);
   
   // Tab control
-  const [activeTab, setActiveTab] = useState('config'); // 'config' | 'versions'
+  const [activeTab, setActiveTab] = useState('config'); // 'config' | 'rawConfig' | 'versions'
 
   // php.ini Config state
   const [phpVersion, setPhpVersion] = useState('');
@@ -30,6 +30,11 @@ export default function PHPConfig() {
   const [postMaxSize, setPostMaxSize] = useState('8M');
   const [maxExecutionTime, setMaxExecutionTime] = useState('30');
   const [displayErrors, setDisplayErrors] = useState(false);
+
+  // Raw php.ini state
+  const [rawContent, setRawContent] = useState('');
+  const [rawLoading, setRawLoading] = useState(false);
+  const [savingRaw, setSavingRaw] = useState(false);
 
   // Extensions list state
   const [extensions, setExtensions] = useState([]);
@@ -51,9 +56,45 @@ export default function PHPConfig() {
   // Load config when selected version changes
   useEffect(() => {
     if (isConnected && selectedVersion) {
-      loadPHPConfig(selectedVersion);
+      if (activeTab === 'config') {
+        loadPHPConfig(selectedVersion);
+      } else if (activeTab === 'rawConfig') {
+        loadRawPHPConfig(selectedVersion);
+      }
     }
-  }, [selectedVersion, isConnected, currentVPS]);
+  }, [selectedVersion, activeTab, isConnected, currentVPS]);
+
+  const loadRawPHPConfig = async (version) => {
+    setRawLoading(true);
+    try {
+      const res = await apiCall('/api/php/config/raw/get', 'POST', { version });
+      if (res.success && res.data) {
+        setRawContent(res.data.content || '');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Lỗi tải cấu hình php.ini thô: ' + err.message, 'error');
+    } finally {
+      setRawLoading(false);
+    }
+  };
+
+  const handleSaveRawConfig = async (e) => {
+    e.preventDefault();
+    setSavingRaw(true);
+    try {
+      await apiCall('/api/php/config/raw/save', 'POST', {
+        path: iniPath,
+        content: rawContent
+      });
+      showToast('Đã lưu cấu hình php.ini và khởi động lại PHP-FPM thành công!', 'success');
+      loadRawPHPConfig(selectedVersion);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingRaw(false);
+    }
+  };
 
   const loadPHPVersions = async () => {
     try {
@@ -233,6 +274,12 @@ export default function PHPConfig() {
           className={`db-tab-item ${activeTab === 'config' ? 'active' : ''}`}
         >
           Cấu hình & Extensions
+        </button>
+        <button 
+          onClick={() => setActiveTab('rawConfig')}
+          className={`db-tab-item ${activeTab === 'rawConfig' ? 'active' : ''}`}
+        >
+          Cấu hình php.ini Thô
         </button>
         <button 
           onClick={() => setActiveTab('versions')}
@@ -452,6 +499,73 @@ export default function PHPConfig() {
             </div>
           )}
         </>
+      )}
+
+      {activeTab === 'rawConfig' && (
+        installedVersions.length === 0 ? (
+          <div className="db-warning-card">
+            <AlertTriangle className="db-warning-icon text-yellow-500" size={24} />
+            <div className="db-warning-text">
+              <strong className="db-warning-title text-yellow-400" style={{ fontSize: '14px' }}>
+                PHP chưa được cài đặt trên VPS này!
+              </strong>
+            </div>
+          </div>
+        ) : (
+          <div className="card-glass p-6 rounded-xl space-y-4">
+            <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="space-y-1">
+                <h2 className="text-base font-bold text-gray-200 flex items-center gap-2">
+                  <Sliders className="text-indigo-400" size={18} />
+                  Trình biên tập php.ini Thô (Raw Editor)
+                </h2>
+                <p className="text-xs text-gray-400">Đường dẫn tệp cấu hình: <code className="text-indigo-300 font-mono">{iniPath}</code></p>
+              </div>
+
+              {/* Selector phiên bản */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-400 whitespace-nowrap">Phiên bản:</label>
+                <select
+                  value={selectedVersion}
+                  onChange={e => setSelectedVersion(e.target.value)}
+                  className="input-glass"
+                  style={{ width: '150px', padding: '6px', fontSize: '12px', background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px' }}
+                >
+                  {installedVersions.map(v => (
+                    <option key={v.version} value={v.version} style={{ background: '#1e1e24', color: '#fff' }}>
+                      PHP {v.version}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {rawLoading ? (
+              <div className="text-center py-20 text-gray-400">
+                <RotateCw size={24} className="animate-spin mx-auto mb-2 text-indigo-500" />
+                Đang tải tệp php.ini thô...
+              </div>
+            ) : (
+              <form onSubmit={handleSaveRawConfig} className="space-y-4">
+                <textarea
+                  value={rawContent}
+                  onChange={e => setRawContent(e.target.value)}
+                  className="w-full min-h-[500px] bg-black/55 text-gray-200 font-mono text-xs p-4 rounded-lg outline-none border border-white/10 focus:border-indigo-500/50 resize-y scrollbar-none"
+                  placeholder="Nội dung php.ini"
+                />
+                <button
+                  type="submit"
+                  disabled={savingRaw}
+                  className="btn btn-primary flex items-center justify-center gap-2"
+                  style={{ padding: '10px 20px' }}
+                >
+                  <Save size={16} />
+                  {savingRaw ? 'Đang lưu & Khởi động lại FPM...' : 'Lưu cấu hình & Restart PHP-FPM'}
+                </button>
+              </form>
+            )}
+          </div>
+        )
       )}
 
       {activeTab === 'versions' && (

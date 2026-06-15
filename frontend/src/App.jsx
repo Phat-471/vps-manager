@@ -22,6 +22,7 @@ import PHPConfig from './pages/PHPConfig';
 import NodeConfig from './pages/NodeConfig';
 import MailConfig from './pages/MailConfig';
 import AppInstaller from './pages/AppInstaller';
+import Webhooks from './pages/Webhooks';
 import './index.css';
 
 const pageMap = {
@@ -32,6 +33,7 @@ const pageMap = {
   stats: <TrafficStats />,
   mysql: <MySQL />,
   applications: <Applications />,
+  webhooks: <Webhooks />,
   files: <FileManager />,
   security: <Security />,
   scheduler: <Scheduler />,

@@ -763,6 +763,41 @@ async function testRcloneRemote(req, res) {
     }
 }
 
+/**
+ * API: Đồng bộ thủ công một file backup hiện tại lên Cloud Remote
+ */
+async function syncFileToCloud(req, res) {
+    try {
+        const { vpsConfig, filename, rcloneRemote, rclonePath } = req.body;
+        if (!filename || !rcloneRemote) {
+            return res.status(400).json({ success: false, error: 'Thiếu tên file hoặc tên Cloud Remote' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const remotePath = rclonePath || '';
+        const localFilePath = `${BACKUP_DIR}/${filename}`;
+
+        // Execute rclone copy command
+        const cmd = `rclone copy ${escapeShellArg(localFilePath)} ${escapeShellArg(rcloneRemote)}:${escapeShellArg(remotePath)}`;
+        const result = await ssh.executeCommand(cmd);
+
+        if (result.code !== 0) {
+            return res.status(500).json({
+                success: false,
+                error: 'Không thể đồng bộ tệp lên đám mây',
+                details: result.stderr || result.stdout
+            });
+        }
+
+        res.json({
+            success: true,
+            message: `Đã đồng bộ tệp ${filename} lên Cloud remote ${rcloneRemote} thành công!`
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listBackups,
     createBackup,
@@ -775,5 +810,6 @@ module.exports = {
     saveRcloneRemote,
     deleteRcloneRemote,
     testRcloneRemote,
+    syncFileToCloud,
     RUNNER_PATH
 };

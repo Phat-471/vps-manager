@@ -16,19 +16,42 @@ import {
   X
 } from 'lucide-react';
 
+const UFW_PRESETS = [
+  { name: 'Tùy chỉnh (Custom)', port: '', proto: 'tcp' },
+  { name: 'Web Server (HTTP/HTTPS: 80, 443)', port: '80,443', proto: 'tcp' },
+  { name: 'Database MySQL (3306)', port: '3306', proto: 'tcp' },
+  { name: 'Database PostgreSQL (5432)', port: '5432', proto: 'tcp' },
+  { name: 'FTP Server (20, 21)', port: '20,21', proto: 'tcp' },
+  { name: 'Mail Server (SMTP/IMAP/POP3)', port: '25,143,993,110,995,465,587', proto: 'tcp' },
+  { name: 'SSH (22)', port: '22', proto: 'tcp' }
+];
+
 export default function Security() {
   const { apiCall, showToast, currentVPS } = useVPS();
   const [activeTab, setActiveTab] = useState('firewall');
   const [loading, setLoading] = useState(false);
 
-  // Tab 1: Firewall UFW & Fail2Ban State
+  // Tab 1: Firewall UFW State
   const [ufwActive, setUfwActive] = useState(false);
   const [ufwRules, setUfwRules] = useState([]);
-  const [fail2banActive, setFail2banActive] = useState(false);
   const [portInput, setPortInput] = useState('');
   const [protoInput, setProtoInput] = useState('tcp');
   const [actionInput, setActionInput] = useState('allow');
   const [fromIpInput, setFromIpInput] = useState('any');
+  const [presetInput, setPresetInput] = useState('Tùy chỉnh (Custom)');
+
+  // Tab 1.5: Fail2Ban State
+  const [fail2banInstalled, setFail2banInstalled] = useState(false);
+  const [fail2banActive, setFail2banActive] = useState(false);
+  const [fail2banJails, setFail2banJails] = useState([]);
+  const [fail2banConfig, setFail2banConfig] = useState({ ignoreip: '', bantime: '', findtime: '', maxretry: '' });
+  const [selectedJail, setSelectedJail] = useState(null);
+  const [manualBanIp, setManualBanIp] = useState('');
+  const [fail2banSubTab, setFail2banSubTab] = useState('jails');
+  const [rawF2bConfig, setRawF2bConfig] = useState('');
+  const [rawF2bLoading, setRawF2bLoading] = useState(false);
+  const [f2bConfigSaving, setF2bConfigSaving] = useState(false);
+  const [serviceActionLoading, setServiceActionLoading] = useState(false);
 
   // Tab 2: Listening Ports State
   const [listeningPorts, setListeningPorts] = useState([]);
@@ -62,7 +85,7 @@ export default function Security() {
   const [zoneDescription, setZoneDescription] = useState('');
 
   useEffect(() => {
-    if (activeTab === 'firewall') {
+    if (activeTab === 'firewall' || activeTab === 'fail2ban') {
       fetchSecurityStatus();
     } else if (activeTab === 'ports') {
       fetchListeningPorts();
@@ -72,6 +95,26 @@ export default function Security() {
       fetchZones();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'fail2ban' && fail2banSubTab === 'raw') {
+      fetchRawFail2BanConfig();
+    }
+  }, [activeTab, fail2banSubTab]);
+
+  const fetchRawFail2BanConfig = async () => {
+    setRawF2bLoading(true);
+    try {
+      const res = await apiCall('/api/security/fail2ban/config/raw/get', 'POST');
+      if (res.success) {
+        setRawF2bConfig(res.data);
+      }
+    } catch (err) {
+      showToast('Lỗi tải cấu hình Fail2Ban: ' + err.message, 'error');
+    } finally {
+      setRawF2bLoading(false);
+    }
+  };
 
   const fetchZones = async () => {
     setZonesLoading(true);
@@ -176,7 +219,24 @@ export default function Security() {
       setUfwRules(ufwRes.data?.rules || []);
 
       const f2bRes = await apiCall('/api/security/fail2ban/status', 'POST');
-      setFail2banActive(f2bRes.data?.active || false);
+      if (f2bRes.success) {
+        setFail2banInstalled(f2bRes.data?.installed || false);
+        setFail2banActive(f2bRes.data?.active || false);
+        const jailsList = f2bRes.data?.jails || [];
+        setFail2banJails(jailsList);
+        setFail2banConfig(f2bRes.data?.config || { ignoreip: '', bantime: '', findtime: '', maxretry: '' });
+        
+        if (jailsList.length > 0) {
+          if (!selectedJail || !jailsList.some(j => j.name === selectedJail.name)) {
+            setSelectedJail(jailsList[0]);
+          } else {
+            const updatedSelected = jailsList.find(j => j.name === selectedJail.name);
+            setSelectedJail(updatedSelected);
+          }
+        } else {
+          setSelectedJail(null);
+        }
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -211,6 +271,7 @@ export default function Security() {
       setPortInput('');
       setFromIpInput('any');
       setActionInput('allow');
+      setPresetInput('Tùy chỉnh (Custom)');
       fetchSecurityStatus();
     } catch (err) {
       console.error(err);
@@ -315,6 +376,100 @@ export default function Security() {
     }
   };
 
+  const handleSaveFail2BanConfig = async (e) => {
+    e.preventDefault();
+    setF2bConfigSaving(true);
+    try {
+      const res = await apiCall('/api/security/fail2ban/config/save', 'POST', {
+        ignoreip: fail2banConfig.ignoreip,
+        bantime: fail2banConfig.bantime,
+        findtime: fail2banConfig.findtime,
+        maxretry: fail2banConfig.maxretry
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        fetchSecurityStatus();
+      }
+    } catch (err) {
+      showToast('Lỗi lưu cấu hình: ' + err.message, 'error');
+    } finally {
+      setF2bConfigSaving(false);
+    }
+  };
+
+  const handleSaveRawFail2BanConfig = async (e) => {
+    e.preventDefault();
+    setF2bConfigSaving(true);
+    try {
+      const res = await apiCall('/api/security/fail2ban/config/raw/save', 'POST', {
+        content: rawF2bConfig
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        fetchSecurityStatus();
+      }
+    } catch (err) {
+      showToast('Lỗi lưu cấu hình thô: ' + err.message, 'error');
+    } finally {
+      setF2bConfigSaving(false);
+    }
+  };
+
+  const handleUnbanIP = async (jailName, ipAddress) => {
+    if (!window.confirm(`Bạn có chắc muốn gỡ chặn IP ${ipAddress} khỏi Jail ${jailName}?`)) return;
+    try {
+      showToast(`Đang gỡ chặn IP ${ipAddress}...`, 'info');
+      const res = await apiCall('/api/security/fail2ban/unban', 'POST', {
+        jail: jailName,
+        ip: ipAddress
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        fetchSecurityStatus();
+      }
+    } catch (err) {
+      showToast('Gỡ chặn thất bại: ' + err.message, 'error');
+    }
+  };
+
+  const handleManualBanIP = async (e) => {
+    e.preventDefault();
+    if (!selectedJail || !manualBanIp.trim()) return;
+    try {
+      showToast(`Đang thực hiện chặn IP ${manualBanIp} trong Jail ${selectedJail.name}...`, 'info');
+      const res = await apiCall('/api/security/fail2ban/ban', 'POST', {
+        jail: selectedJail.name,
+        ip: manualBanIp.trim()
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        setManualBanIp('');
+        fetchSecurityStatus();
+      }
+    } catch (err) {
+      showToast('Chặn IP thất bại: ' + err.message, 'error');
+    }
+  };
+
+  const handleControlFail2Ban = async (action) => {
+    const actionLabel = action === 'start' ? 'khởi động' : action === 'stop' ? 'dừng' : 'khởi động lại';
+    if (action === 'stop' && !window.confirm('Cảnh báo: Dừng Fail2Ban sẽ vô hiệu hóa tính năng bảo vệ dò quét mật khẩu. Bạn có chắc chắn muốn tiếp tục?')) return;
+    
+    setServiceActionLoading(true);
+    try {
+      showToast(`Đang gửi yêu cầu ${actionLabel} Fail2Ban...`, 'info');
+      const res = await apiCall('/api/security/fail2ban/control', 'POST', { action });
+      if (res.success) {
+        showToast(res.message, 'success');
+        fetchSecurityStatus();
+      }
+    } catch (err) {
+      showToast(`Lỗi ${actionLabel} Fail2Ban: ` + err.message, 'error');
+    } finally {
+      setServiceActionLoading(false);
+    }
+  };
+
   // Tab 4: Configure Panel SSL Method
   const handleConfigurePanelSSL = async (e) => {
     e.preventDefault();
@@ -403,7 +558,7 @@ export default function Security() {
       <div className="explorer-header">
         <div className="explorer-header-title">
           <h1 className="text-2xl font-bold tracking-tight font-outfit">Bảo mật hệ thống</h1>
-          <p className="text-sm text-gray-400">Giám sát tường lửa, kiểm tra cổng mạng đang lắng nghe, bảo mật SSH và SSL cho Panel</p>
+          <p className="text-sm text-gray-400">Giám sát tường lửa, rà soát cổng mạng, cấu hình Fail2Ban, bảo mật SSH và chứng chỉ SSL Panel</p>
         </div>
       </div>
 
@@ -414,14 +569,21 @@ export default function Security() {
           className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === 'firewall' ? 'active bg-indigo-500/20 text-indigo-300' : 'text-gray-400 hover:text-white'}`}
         >
           <Shield size={16} />
-          Tường lửa & Dịch vụ
+          Tường lửa UFW
+        </button>
+        <button 
+          onClick={() => setActiveTab('fail2ban')}
+          className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === 'fail2ban' ? 'active bg-indigo-500/20 text-indigo-300' : 'text-gray-400 hover:text-white'}`}
+        >
+          <ShieldAlert size={16} />
+          Bảo vệ Fail2Ban
         </button>
         <button 
           onClick={() => setActiveTab('ports')}
           className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === 'ports' ? 'active bg-indigo-500/20 text-indigo-300' : 'text-gray-400 hover:text-white'}`}
         >
           <Activity size={16} />
-          Cổng kết nối (Listening Ports)
+          Cổng kết nối (Ports)
         </button>
         <button 
           onClick={() => setActiveTab('ssh')}
@@ -441,8 +603,8 @@ export default function Security() {
           onClick={() => setActiveTab('blacklist')}
           className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === 'blacklist' ? 'active bg-indigo-500/20 text-indigo-300' : 'text-gray-400 hover:text-white'}`}
         >
-          <ShieldAlert size={16} />
-          Danh sách đen IP (Blacklist)
+          <ShieldAlert size={16} className="text-red-400" />
+          Blacklist IP
         </button>
         <button 
           onClick={() => setActiveTab('zones')}
@@ -453,65 +615,28 @@ export default function Security() {
         </button>
       </div>
 
-      {/* TAB 1: Firewall UFW & Fail2Ban */}
+      {/* TAB 1: Firewall UFW */}
       {activeTab === 'firewall' && (
         <div className="space-y-6">
-          <div className="grid-2">
-            {/* UFW Panel */}
-            <div className="card-glass p-6 rounded-xl flex flex-col justify-between" style={{ minHeight: '190px' }}>
-              <div className="space-y-3">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Shield size={22} className={ufwActive ? 'text-green-400' : 'text-red-400'} />
-                    <h2 className="text-lg font-semibold">Tường lửa UFW</h2>
-                  </div>
-                  <span className={`status-badge ${ufwActive ? 'success' : 'danger'}`}>
-                    {ufwActive ? 'Đang hoạt động' : 'Tắt'}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-400 leading-relaxed">UFW (Uncomplicated Firewall) giúp giới hạn các kết nối mạng bất hợp pháp tới VPS của bạn.</p>
+          <div className="card-glass p-6 rounded-xl flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="space-y-1 text-left">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Shield size={22} className={ufwActive ? 'text-green-400' : 'text-red-400'} />
+                <h2 className="text-lg font-bold">Tường lửa UFW</h2>
+                <span className={`status-badge ${ufwActive ? 'success' : 'danger'}`}>
+                  {ufwActive ? 'Đang hoạt động' : 'Tắt'}
+                </span>
               </div>
-              <button
-                onClick={toggleUFW}
-                className={`btn btn-block ${ufwActive ? 'btn-danger' : 'btn-success'}`}
-                style={{ marginTop: '16px', padding: '10px' }}
-              >
-                <Power size={16} />
-                {ufwActive ? 'Vô hiệu hóa Tường lửa' : 'Kích hoạt Tường lửa'}
-              </button>
+              <p className="text-sm text-gray-400 leading-relaxed">UFW (Uncomplicated Firewall) giúp quản lý lưu lượng mạng ra vào và chặn các cổng truy cập trái phép trên VPS.</p>
             </div>
-
-            {/* Fail2Ban Panel */}
-            <div className="card-glass p-6 rounded-xl flex flex-col justify-between" style={{ minHeight: '190px' }}>
-              <div className="space-y-3">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <ShieldAlert size={22} className={fail2banActive ? 'text-green-400' : 'text-yellow-400'} />
-                    <h2 className="text-lg font-semibold">Fail2Ban Service</h2>
-                  </div>
-                  <span className={`status-badge ${fail2banActive ? 'success' : 'warning'}`}>
-                    {fail2banActive ? 'Đang hoạt động' : 'Tắt / Chưa cài đặt'}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-400 leading-relaxed">Tự động phát hiện và chặn các địa chỉ IP thực hiện brute-force dò tìm mật khẩu qua cổng SSH.</p>
-              </div>
-              
-              {!fail2banActive ? (
-                <button
-                  onClick={handleInstallFail2Ban}
-                  disabled={loadingFail2ban}
-                  className="btn btn-success btn-block"
-                  style={{ marginTop: '16px', padding: '10px' }}
-                >
-                  {loadingFail2ban ? 'Đang cài đặt...' : 'Cài đặt & Kích hoạt Fail2Ban'}
-                </button>
-              ) : (
-                <div className="db-warning-card" style={{ marginTop: '16px', padding: '8px 12px' }}>
-                  <Shield size={16} className="db-warning-icon text-green-400 shrink-0" />
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}> Fail2Ban đang hoạt động ổn định và tự động bảo vệ hệ thống của bạn.</span>
-                </div>
-              )}
-            </div>
+            <button
+              onClick={toggleUFW}
+              className={`btn ${ufwActive ? 'btn-danger' : 'btn-success'} whitespace-nowrap`}
+              style={{ padding: '10px 20px' }}
+            >
+              <Power size={16} />
+              {ufwActive ? 'Vô hiệu hóa Tường lửa' : 'Kích hoạt Tường lửa'}
+            </button>
           </div>
 
           {ufwActive && (
@@ -593,15 +718,37 @@ export default function Security() {
                   </div>
 
                   <div className="form-group">
+                    <label>Quy tắc mẫu (Preset)</label>
+                    <select
+                      value={presetInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPresetInput(val);
+                        const found = UFW_PRESETS.find(p => p.name === val);
+                        if (found) {
+                          setPortInput(found.port);
+                          setProtoInput(found.proto);
+                        }
+                      }}
+                      className="input-glass"
+                    >
+                      {UFW_PRESETS.map((p, idx) => (
+                        <option key={idx} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
                     <label>Cổng dịch vụ (Port)</label>
                     <input
                       type="text"
                       required
-                      placeholder="Ví dụ: 80, 3306, 3000:3010 hoặc any"
+                      placeholder="Ví dụ: 80, 443 hoặc any"
                       value={portInput}
                       onChange={(e) => setPortInput(e.target.value)}
-                      className="input-glass"
+                      className="input-glass font-mono text-sm"
                     />
+                    <p className="text-[10px] text-gray-400 mt-1">Hỗ trợ nhiều cổng cách nhau bằng dấu phẩy. VD: `80,443,3000`</p>
                   </div>
 
                   <div className="form-group">
@@ -640,6 +787,296 @@ export default function Security() {
                   </button>
                 </form>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 1.5: Fail2Ban */}
+      {activeTab === 'fail2ban' && (
+        <div className="space-y-6">
+          {/* Header & Service Actions */}
+          <div className="card-glass p-6 rounded-xl flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="space-y-1 text-left">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldAlert size={22} className={fail2banActive ? 'text-green-400' : 'text-yellow-400'} />
+                <h2 className="text-lg font-bold">Dịch vụ chống brute-force Fail2Ban</h2>
+                <span className={`status-badge ${!fail2banInstalled ? 'danger' : fail2banActive ? 'success' : 'warning'}`}>
+                  {!fail2banInstalled ? 'Chưa cài đặt' : fail2banActive ? 'Đang hoạt động' : 'Tắt'}
+                </span>
+              </div>
+              <p className="text-sm text-gray-400 leading-relaxed">Tự động phát hiện và chặn tạm thời hoặc vĩnh viễn các địa chỉ IP Brute force thông qua các tệp nhật ký đăng nhập.</p>
+            </div>
+            
+            {!fail2banInstalled ? (
+              <button
+                onClick={handleInstallFail2Ban}
+                disabled={loadingFail2ban}
+                className="btn btn-success whitespace-nowrap"
+                style={{ padding: '10px 20px' }}
+              >
+                {loadingFail2ban ? 'Đang cài đặt...' : 'Cài đặt & Kích hoạt'}
+              </button>
+            ) : (
+              <div className="flex gap-2" style={{ display: 'flex', gap: '8px' }}>
+                {fail2banActive ? (
+                  <button
+                    onClick={() => handleControlFail2Ban('stop')}
+                    disabled={serviceActionLoading}
+                    className="btn btn-danger btn-sm flex items-center gap-1.5"
+                  >
+                    <Power size={14} /> Dừng
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleControlFail2Ban('start')}
+                    disabled={serviceActionLoading}
+                    className="btn btn-success btn-sm flex items-center gap-1.5"
+                  >
+                    <Power size={14} /> Bật
+                  </button>
+                )}
+                <button
+                  onClick={() => handleControlFail2Ban('restart')}
+                  disabled={serviceActionLoading}
+                  className="btn btn-glass btn-sm flex items-center gap-1.5"
+                >
+                  <RefreshCw size={14} className={serviceActionLoading ? 'animate-spin' : ''} /> Khởi động lại
+                </button>
+              </div>
+            )}
+          </div>
+
+          {fail2banInstalled && fail2banActive && (
+            <div className="space-y-6">
+              {/* Fail2Ban Sub Tabs */}
+              <div className="flex border-b border-white/5 gap-4" style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.05)', gap: '16px' }}>
+                <button
+                  onClick={() => setFail2banSubTab('jails')}
+                  className={`py-2 px-1 text-sm font-semibold border-b-2 transition-all ${fail2banSubTab === 'jails' ? 'border-indigo-500 text-indigo-300' : 'border-transparent text-gray-400 hover:text-white'}`}
+                >
+                  Giám sát Jails & Banned IPs
+                </button>
+                <button
+                  onClick={() => setFail2banSubTab('settings')}
+                  className={`py-2 px-1 text-sm font-semibold border-b-2 transition-all ${fail2banSubTab === 'settings' ? 'border-indigo-500 text-indigo-300' : 'border-transparent text-gray-400 hover:text-white'}`}
+                >
+                  Cấu hình tham số
+                </button>
+                <button
+                  onClick={() => setFail2banSubTab('raw')}
+                  className={`py-2 px-1 text-sm font-semibold border-b-2 transition-all ${fail2banSubTab === 'raw' ? 'border-indigo-500 text-indigo-300' : 'border-transparent text-gray-400 hover:text-white'}`}
+                >
+                  Cấu hình jail.local thô
+                </button>
+              </div>
+
+              {/* Sub-tab 1: Jails Monitoring */}
+              {fail2banSubTab === 'jails' && (
+                <div className="db-layout-container">
+                  {/* Left Column: Jails List */}
+                  <div className="db-layout-sidebar card-glass p-6 rounded-xl space-y-4">
+                    <h3 className="font-semibold text-base flex items-center gap-2">
+                      <Server size={18} className="text-indigo-400" />
+                      Danh sách Jails
+                    </h3>
+                    <p className="text-xs text-gray-400">Chọn một Jail để xem chi tiết và danh sách IP bị chặn.</p>
+                    
+                    {fail2banJails.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-4 text-center">Không có Jail hoạt động nào.</p>
+                    ) : (
+                      <div className="space-y-2" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {fail2banJails.map(jail => (
+                          <button
+                            key={jail.name}
+                            onClick={() => setSelectedJail(jail)}
+                            className={`w-full p-3 rounded-lg text-left transition-all border text-sm flex justify-between items-center ${selectedJail?.name === jail.name ? 'bg-indigo-500/10 border-indigo-500/30 text-white font-semibold' : 'bg-white/5 border-transparent text-gray-300 hover:bg-white/10'}`}
+                          >
+                            <span className="font-mono">{jail.name}</span>
+                            <span className="status-badge danger" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                              {jail.currentlyBanned} blocked
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: Banned IP List */}
+                  <div className="db-layout-main card-glass p-6 rounded-xl space-y-4">
+                    {selectedJail ? (
+                      <div className="space-y-4">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <h3 className="font-semibold text-lg flex items-center gap-2">
+                            <ShieldAlert size={18} className="text-red-400" />
+                            Jail: <span className="font-mono text-indigo-300">{selectedJail.name}</span>
+                          </h3>
+                          <span className="text-xs text-gray-400">
+                            Total banned: {selectedJail.totalBanned} | Bị chặn hiện tại: {selectedJail.currentlyBanned}
+                          </span>
+                        </div>
+
+                        {/* Ban IP Manual Form */}
+                        <form onSubmit={handleManualBanIP} className="flex gap-2" style={{ display: 'flex', gap: '8px' }}>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Nhập IP để chặn thủ công trong jail này"
+                            value={manualBanIp}
+                            onChange={(e) => setManualBanIp(e.target.value)}
+                            className="input-glass flex-grow font-mono text-sm"
+                            style={{ flexGrow: 1, padding: '8px' }}
+                          />
+                          <button type="submit" className="btn btn-danger" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Plus size={14} /> Chặn IP
+                          </button>
+                        </form>
+
+                        {/* List of currently banned IPs in this Jail */}
+                        {selectedJail.bannedIPs.length === 0 ? (
+                          <p className="text-sm text-gray-400 py-8 text-center font-normal">Jail này hiện không chặn IP nào.</p>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="explorer-list-table">
+                              <thead>
+                                <tr>
+                                  <th>Địa chỉ IP bị chặn</th>
+                                  <th style={{ textAlign: 'center', width: '120px' }}>Hành động</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {selectedJail.bannedIPs.map(ip => (
+                                  <tr key={ip}>
+                                    <td className="font-mono text-sm font-semibold text-red-300">{ip}</td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <button
+                                        onClick={() => handleUnbanIP(selectedJail.name, ip)}
+                                        className="btn btn-glass btn-xs text-green-400 hover:text-green-300"
+                                        style={{ padding: '4px 8px', fontSize: '11px' }}
+                                      >
+                                        Gỡ chặn (Unban)
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 py-12 text-center">Vui lòng chọn một Jail từ danh sách bên trái.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-tab 2: Settings parameters */}
+              {fail2banSubTab === 'settings' && (
+                <div className="card-glass p-6 rounded-xl max-w-2xl mx-auto space-y-6">
+                  <h3 className="font-semibold text-lg flex items-center gap-2">
+                    <Server size={18} className="text-indigo-400" />
+                    Cấu hình tham số Fail2Ban [DEFAULT]
+                  </h3>
+                  <form onSubmit={handleSaveFail2BanConfig} className="space-y-4">
+                    <div className="form-group">
+                      <label>Danh sách IP loại trừ (ignoreip)</label>
+                      <input
+                        type="text"
+                        required
+                        value={fail2banConfig.ignoreip}
+                        onChange={(e) => setFail2banConfig({ ...fail2banConfig, ignoreip: e.target.value })}
+                        className="input-glass font-mono text-xs"
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
+                        Các IP hoặc subnet cách nhau bằng khoảng trắng sẽ không bao giờ bị chặn. Ví dụ: `127.0.0.1/8 ::1 1.2.3.4`.
+                      </p>
+                    </div>
+
+                    <div className="grid-2">
+                      <div className="form-group">
+                        <label>Thời gian chặn (bantime)</label>
+                        <input
+                          type="text"
+                          required
+                          value={fail2banConfig.bantime}
+                          onChange={(e) => setFail2banConfig({ ...fail2banConfig, bantime: e.target.value })}
+                          className="input-glass font-mono"
+                          placeholder="Ví dụ: 10m hoặc 1d"
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">Thời gian khóa IP. Định dạng: `m` (phút), `h` (giờ), `d` (ngày).</p>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Chu kỳ theo dõi (findtime)</label>
+                        <input
+                          type="text"
+                          required
+                          value={fail2banConfig.findtime}
+                          onChange={(e) => setFail2banConfig({ ...fail2banConfig, findtime: e.target.value })}
+                          className="input-glass font-mono"
+                          placeholder="Ví dụ: 10m"
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">Thời gian theo dõi số lần đăng nhập sai.</p>
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label>Số lần thử tối đa (maxretry)</label>
+                      <input
+                        type="number"
+                        required
+                        value={fail2banConfig.maxretry}
+                        onChange={(e) => setFail2banConfig({ ...fail2banConfig, maxretry: e.target.value })}
+                        className="input-glass font-mono"
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">Số lần đăng nhập sai tối đa trong chu kỳ `findtime` trước khi bị khóa.</p>
+                    </div>
+
+                    <button type="submit" disabled={f2bConfigSaving} className="btn btn-primary btn-block" style={{ padding: '10px' }}>
+                      {f2bConfigSaving ? 'Đang lưu cấu hình...' : 'Lưu Cấu Hình & Tải lại Fail2Ban'}
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* Sub-tab 3: Raw config editor */}
+              {fail2banSubTab === 'raw' && (
+                <div className="card-glass p-6 rounded-xl space-y-4">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <h3 className="font-semibold text-lg flex items-center gap-2">
+                        <Server size={18} className="text-indigo-400" />
+                        Trình chỉnh sửa thô jail.local
+                      </h3>
+                      <p className="text-xs text-gray-400">Cấu hình trực tiếp file `/etc/fail2ban/jail.local`. Cần đảm bảo đúng cú pháp INI.</p>
+                    </div>
+                    <button type="button" onClick={fetchRawFail2BanConfig} disabled={rawF2bLoading} className="btn btn-glass btn-sm flex items-center gap-1">
+                      <RefreshCw size={14} className={rawF2bLoading ? 'animate-spin' : ''} /> Quét lại
+                    </button>
+                  </div>
+
+                  {rawF2bLoading ? (
+                    <div className="py-12 flex justify-center">
+                      <span className="w-8 h-8 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSaveRawFail2BanConfig} className="space-y-4">
+                      <textarea
+                        required
+                        rows={22}
+                        value={rawF2bConfig}
+                        onChange={(e) => setRawF2bConfig(e.target.value)}
+                        className="w-full bg-[#111] text-[#0f0] font-mono text-xs p-4 rounded-lg border border-white/10 focus:outline-none focus:border-indigo-500"
+                        style={{ lineHeight: '1.5' }}
+                      />
+                      <button type="submit" disabled={f2bConfigSaving} className="btn btn-primary btn-block" style={{ padding: '10px' }}>
+                        {f2bConfigSaving ? 'Đang lưu...' : 'Lưu Cấu Hình Thô & Reload Fail2Ban'}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

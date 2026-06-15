@@ -21,7 +21,10 @@ export default function NodeConfig() {
     nvmInstalled: false,
     nvmVersion: '',
     nodeVersion: '',
-    npmVersion: ''
+    npmVersion: '',
+    pm2Installed: false,
+    pm2Version: '',
+    pm2StartupEnabled: false
   });
 
   const [versionsData, setVersionsData] = useState({
@@ -39,7 +42,7 @@ export default function NodeConfig() {
 
   const [installingNvm, setInstallingNvm] = useState(false);
   const [actionVersion, setActionVersion] = useState(null);
-  const [actionType, setActionType] = useState(''); // 'install' | 'default'
+  const [actionType, setActionType] = useState(''); // 'install' | 'default' | 'pm2'
   const [customVersion, setCustomVersion] = useState('');
 
   useEffect(() => {
@@ -167,6 +170,21 @@ export default function NodeConfig() {
     setCustomVersion('');
   };
 
+  const handleTogglePM2Startup = async (action) => {
+    setLoading(true);
+    try {
+      const res = await apiCall('/api/node/pm2/startup', 'POST', { action });
+      if (res.success) {
+        showToast(res.message, 'success');
+        await checkNvmStatus();
+      }
+    } catch (err) {
+      showToast(err.response?.data?.error || err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRefresh = async () => {
     await checkNvmStatus();
   };
@@ -287,6 +305,58 @@ export default function NodeConfig() {
             </div>
           </div>
 
+          {/* PM2 Daemon autostart configuration */}
+          {nvmStatus.pm2Installed ? (
+            <div className="card-glass p-5 rounded-xl border border-white/5 space-y-4">
+              <div className="flex justify-between items-center flex-wrap gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-purple-500/10 rounded-lg text-purple-400">
+                    <Server size={22} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-200 text-sm">Cấu hình PM2 Daemon (Tự khởi chạy cùng hệ điều hành)</h3>
+                    <p className="text-[11px] text-gray-400">PM2 v{nvmStatus.pm2Version} - Đảm bảo các ứng dụng Node.js tự động khôi phục sau khi reboot VPS.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${nvmStatus.pm2StartupEnabled ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                    {nvmStatus.pm2StartupEnabled ? 'ĐANG BẬT' : 'ĐANG TẮT'}
+                  </span>
+                  
+                  {nvmStatus.pm2StartupEnabled ? (
+                    <button
+                      onClick={() => handleTogglePM2Startup('disable')}
+                      disabled={loading}
+                      className="btn btn-danger text-xs font-semibold py-1.5 px-3 rounded-lg"
+                    >
+                      Tắt khởi động cùng OS
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleTogglePM2Startup('enable')}
+                      disabled={loading}
+                      className="btn btn-primary text-xs font-semibold py-1.5 px-3 rounded-lg"
+                    >
+                      Bật khởi động cùng OS
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="card-glass p-5 rounded-xl border border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-yellow-500/10 rounded-lg text-yellow-400">
+                  <AlertTriangle size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-200 text-sm">PM2 chưa được cài đặt trên VPS này</h3>
+                  <p className="text-[11px] text-gray-400">Hãy cài đặt PM2 bằng cách triển khai một Node.js App hoặc cài thông qua mục dịch vụ hệ thống.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '24px' }}>
 
             {/* CỘT TRÁI: PHIÊN BẢN ĐÃ CÀI ĐẶT CỤC BỘ */}
@@ -334,7 +404,11 @@ export default function NodeConfig() {
                               className={`btn text-xs ${isDefault ? 'btn-secondary text-gray-500 cursor-not-allowed' : 'btn-primary'}`}
                               style={{ padding: '6px 12px' }}
                             >
-                              {actionVersion === v.version && actionType === 'default' ? 'Đang đặt...' : 'Mặc định'}
+                              {actionVersion === v.version && actionType === 'default' ? (
+                                <span className="flex items-center gap-1">
+                                  <RotateCw size={12} className="animate-spin" /> Đang đặt...
+                                </span>
+                              ) : 'Mặc định'}
                             </button>
                             <button
                               onClick={() => handleUninstallNode(v.version)}
@@ -342,7 +416,11 @@ export default function NodeConfig() {
                               className={`btn text-xs ${isDefault ? 'btn-secondary text-gray-500' : 'btn-danger'}`}
                               style={{ padding: '6px 12px' }}
                             >
-                              {actionVersion === v.version && actionType === 'uninstall' ? 'Đang gỡ...' : 'Gỡ'}
+                              {actionVersion === v.version && actionType === 'uninstall' ? (
+                                <span className="flex items-center gap-1">
+                                  <RotateCw size={12} className="animate-spin" /> Đang gỡ...
+                                </span>
+                              ) : 'Gỡ'}
                             </button>
                           </div>
                         </div>
@@ -370,7 +448,15 @@ export default function NodeConfig() {
                         className="btn btn-primary flex items-center gap-1.5 text-xs font-semibold"
                         style={{ padding: '8px 16px' }}
                       >
-                        <Download size={14} /> Tải & Cài đặt
+                        {actionVersion !== null ? (
+                          <span className="flex items-center gap-1">
+                            <RotateCw size={12} className="animate-spin" /> Đang tải...
+                          </span>
+                        ) : (
+                          <>
+                            <Download size={14} /> Tải & Cài đặt
+                          </>
+                        )}
                       </button>
                     </div>
                     <small className="text-[10px] text-gray-500 block leading-tight">Bạn có thể điền mã phiên bản (vd: 16.20.0), số chính (vd: 20) hoặc nhãn LTS (vd: lts/iron).</small>
@@ -415,7 +501,11 @@ export default function NodeConfig() {
                               className="btn btn-glass text-xs py-1 px-3 hover:bg-indigo-600 hover:text-white"
                               style={{ padding: '4px 10px' }}
                             >
-                              {actionVersion === v.version && actionType === 'install' ? 'Đang cài...' : 'Cài đặt'}
+                              {actionVersion === v.version && actionType === 'install' ? (
+                                <span className="flex items-center gap-1">
+                                  <RotateCw size={12} className="animate-spin" /> Đang cài...
+                                </span>
+                              ) : 'Cài đặt'}
                             </button>
                           )}
                         </div>
