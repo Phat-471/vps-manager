@@ -75,6 +75,13 @@ fi
 echo -e "${YELLOW}4. Đang cài đặt mã nguồn VPS Manager...${NC}"
 # Tạo thư mục và tải code từ Git
 GIT_REPO="https://github.com/Phat-471/vps-manager.git"
+
+echo -e "Nhập link Git chứa code của bạn (Bấm Enter để dùng mặc định: $GIT_REPO):"
+read -r INPUT_REPO
+if [ -n "$INPUT_REPO" ]; then
+    GIT_REPO="$INPUT_REPO"
+fi
+
 rm -rf /var/www/vps-manager
 echo -e "Đang tải mã nguồn từ: ${BLUE}$GIT_REPO${NC}..."
 git clone "$GIT_REPO" /var/www/vps-manager
