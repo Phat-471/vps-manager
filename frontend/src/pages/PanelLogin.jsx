@@ -1,10 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Shield, KeyRound, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 
 export default function PanelLogin({ onLogin }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const pwdParam = params.get('password');
+    if (pwdParam) {
+      setPassword(pwdParam);
+      const autoLogin = async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const response = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ password: pwdParam }),
+          });
+
+          const result = await response.json();
+
+          if (response.ok && result.success) {
+            // Xóa query parameter khỏi URL để tránh lưu lịch sử duyệt web
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+            onLogin(result.token);
+          } else {
+            setError(result.error || 'Mật khẩu từ liên kết không chính xác');
+          }
+        } catch (err) {
+          console.error(err);
+          setError('Không thể kết nối tự động đến máy chủ. Vui lòng thử lại.');
+        } finally {
+          setLoading(false);
+        }
+      };
+      autoLogin();
+    }
+  }, [onLogin]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

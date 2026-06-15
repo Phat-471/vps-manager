@@ -38,6 +38,8 @@ export default function Dashboard() {
   const [setupPassword, setSetupPassword] = useState('');
   const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
   const [setupLoading, setSetupLoading] = useState(false);
+  const [setupSuccess, setSetupSuccess] = useState(false);
+  const [setupFinishedPassword, setSetupFinishedPassword] = useState('');
 
   // Service Health state (Phase 6)
   const [serviceHealth, setServiceHealth] = useState([]);
@@ -177,9 +179,8 @@ export default function Dashboard() {
     try {
       const result = await setupPanel(setupPassword);
       if (result.success) {
-        setShowSetupModal(false);
-        setSetupPassword('');
-        setSetupConfirmPassword('');
+        setSetupFinishedPassword(setupPassword);
+        setSetupSuccess(true);
       }
     } catch (err) {
       console.error(err);
@@ -1209,44 +1210,133 @@ export default function Dashboard() {
           <div className="modal-content" style={{ width: '450px' }}>
             <div className="modal-header">
               <h2>Thiết lập mật khẩu bảo mật Panel</h2>
-              <button onClick={() => setShowSetupModal(false)} className="modal-close-btn"><X size={18} /></button>
+              <button 
+                onClick={() => {
+                  setShowSetupModal(false);
+                  setSetupSuccess(false);
+                  setSetupPassword('');
+                  setSetupConfirmPassword('');
+                  setSetupFinishedPassword('');
+                }} 
+                className="modal-close-btn"
+              >
+                <X size={18} />
+              </button>
             </div>
-            <form onSubmit={handleSetupPassword}>
-              <div className="modal-body space-y-4">
-                <p className="text-xs text-gray-400 mb-2">
-                  Đặt mật khẩu để khóa bảng điều khiển này. Sau khi lưu, bạn sẽ cần đăng nhập bằng mật khẩu này để truy cập tất cả tính năng quản trị từ xa.
+            {!setupSuccess ? (
+              <form onSubmit={handleSetupPassword}>
+                <div className="modal-body space-y-4">
+                  <p className="text-xs text-gray-400 mb-2">
+                    Đặt mật khẩu để khóa bảng điều khiển này. Sau khi lưu, bạn sẽ cần đăng nhập bằng mật khẩu này để truy cập tất cả tính năng quản trị từ xa.
+                  </p>
+                  <div className="form-group">
+                    <label>Mật khẩu Panel mới</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="Mật khẩu mới (tối thiểu 6 ký tự)"
+                      value={setupPassword}
+                      onChange={(e) => setSetupPassword(e.target.value)}
+                      className="input-glass"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Nhập lại mật khẩu</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="Nhập lại mật khẩu Panel"
+                      value={setupConfirmPassword}
+                      onChange={(e) => setSetupConfirmPassword(e.target.value)}
+                      className="input-glass"
+                    />
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button 
+                    type="button" 
+                    className="btn btn-glass" 
+                    onClick={() => {
+                      setShowSetupModal(false);
+                      setSetupPassword('');
+                      setSetupConfirmPassword('');
+                    }}
+                  >
+                    Hủy
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={setupLoading}>
+                    {setupLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Kích hoạt bảo mật'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="modal-body space-y-4 py-4 text-center">
+                <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-400 mb-2">
+                  <Check size={24} />
+                </div>
+                <h3 className="text-base font-bold text-emerald-400">Thiết lập bảo mật thành công!</h3>
+                <p className="text-xs text-gray-400">
+                  Panel đã được kích hoạt chế độ bảo mật. Vui lòng tải xuống thông tin đăng nhập này hoặc lưu lại để tránh mất quyền truy cập.
                 </p>
-                <div className="form-group">
-                  <label>Mật khẩu Panel mới</label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="Mật khẩu mới (tối thiểu 6 ký tự)"
-                    value={setupPassword}
-                    onChange={(e) => setSetupPassword(e.target.value)}
-                    className="input-glass"
-                    autoFocus
-                  />
+                
+                <div className="bg-white/5 rounded-lg p-3 text-left space-y-2 text-xs border border-white/10 font-mono">
+                  <div className="flex justify-between" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span className="text-gray-400">Cổng Panel (Port):</span>
+                    <span className="text-indigo-300 font-semibold">{window.location.port || (window.location.protocol === 'https:' ? '443' : '80')}</span>
+                  </div>
+                  <div className="flex justify-between" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span className="text-gray-400">Tài khoản (User):</span>
+                    <span className="text-indigo-300 font-semibold">admin</span>
+                  </div>
+                  <div className="flex justify-between" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span className="text-gray-400">Mật khẩu (Pass):</span>
+                    <span className="text-indigo-300 font-semibold">{setupFinishedPassword}</span>
+                  </div>
+                  <div className="border-t border-white/5 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '8px' }}>
+                    <span className="text-gray-400 block mb-1" style={{ display: 'block', marginBottom: '4px' }}>Đường dẫn đăng nhập tự động:</span>
+                    <div className="text-[10px] text-gray-300 break-all select-all p-1 bg-black/20 rounded border border-white/5" style={{ wordBreak: 'break-all', padding: '4px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '4px' }}>
+                      {`${window.location.protocol}//${window.location.host}/?password=${encodeURIComponent(setupFinishedPassword)}`}
+                    </div>
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label>Nhập lại mật khẩu</label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="Nhập lại mật khẩu Panel"
-                    value={setupConfirmPassword}
-                    onChange={(e) => setSetupConfirmPassword(e.target.value)}
-                    className="input-glass"
-                  />
+
+                <div className="flex flex-col gap-2 pt-2" style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px' }}>
+                  <button 
+                    onClick={() => {
+                      const loginLink = `${window.location.protocol}//${window.location.host}/?password=${encodeURIComponent(setupFinishedPassword)}`;
+                      const content = `=======================================\nTHÔNG TIN ĐĂNG NHẬP PANEL VPS MANAGER\n=======================================\n\nCổng Panel (Port): ${window.location.port || (window.location.protocol === 'https:' ? '443' : '80')}\nTài khoản (User): admin\nMật khẩu (Pass): ${setupFinishedPassword}\n\nLiên kết truy cập đăng nhập tự động:\n${loginLink}\n\n=======================================`;
+                      
+                      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                      const element = document.createElement('a');
+                      element.href = URL.createObjectURL(blob);
+                      element.download = `vps_panel_credentials_${window.location.hostname}.txt`;
+                      document.body.appendChild(element);
+                      element.click();
+                      document.body.removeChild(element);
+                      showToast('Đã tải tệp thông tin đăng nhập về máy!', 'success');
+                    }}
+                    className="btn btn-primary w-full py-2.5 flex items-center justify-center gap-2 font-semibold"
+                    style={{ width: '100%', padding: '10px 0' }}
+                  >
+                    Lưu thông tin đăng nhập về máy
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setShowSetupModal(false);
+                      setSetupSuccess(false);
+                      setSetupPassword('');
+                      setSetupConfirmPassword('');
+                      setSetupFinishedPassword('');
+                    }}
+                    className="btn btn-glass w-full py-2.5 font-semibold"
+                    style={{ width: '100%', padding: '10px 0' }}
+                  >
+                    Hoàn tất & Đóng
+                  </button>
                 </div>
               </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-glass" onClick={() => setShowSetupModal(false)}>Hủy</button>
-                <button type="submit" className="btn btn-primary" disabled={setupLoading}>
-                  {setupLoading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Kích hoạt bảo mật'}
-                </button>
-              </div>
-            </form>
+            )}
           </div>
         </div>
       )}
