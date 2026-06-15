@@ -1,5 +1,6 @@
 const { connectionPool } = require('../utils/ssh');
 const { sanitizeAlphaNum, escapeShellArg } = require('../utils/security');
+const { logActivity } = require('../utils/logger');
 
 async function listDatabases(req, res) {
     try {
@@ -43,6 +44,7 @@ async function addDatabase(req, res) {
         }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`mysql -e 'CREATE DATABASE \`${safeName}\`;'`);
+        logActivity('Tạo CSDL', `Đã tạo cơ sở dữ liệu MySQL: \`${name}\``, vpsConfig.id);
         res.json({ success: true, message: 'Database created' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -61,6 +63,7 @@ async function addUser(req, res) {
         
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`mysql -e ${escapeShellArg(sql)}`);
+        logActivity('Tạo User CSDL', `Đã tạo người dùng MySQL: \`${user}\``, vpsConfig.id);
         res.json({ success: true, message: 'User created' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -76,6 +79,7 @@ async function deleteDatabase(req, res) {
         }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`mysql -e 'DROP DATABASE \`${safeName}\`;'`);
+        logActivity('Xóa CSDL', `Đã xóa cơ sở dữ liệu MySQL: \`${name}\``, vpsConfig.id);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -96,6 +100,7 @@ async function deleteUser(req, res) {
         const sql = `DROP USER '${safeUser}'@'${safeHost}';`;
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`mysql -e ${escapeShellArg(sql)}`);
+        logActivity('Xóa User CSDL', `Đã xóa người dùng MySQL: \`${user}\`@\`${safeHost}\``, vpsConfig.id);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -153,6 +158,7 @@ async function importDatabase(req, res) {
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
         await ssh.executeCommand(`mysql ${safeName} < ${escapeShellArg(remotePath)}`);
+        logActivity('Nhập CSDL MySQL', `Đã nạp (import) tệp tin SQL vào cơ sở dữ liệu \`${name}\``, vpsConfig.id);
         res.json({ success: true, message: 'Import successful' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });

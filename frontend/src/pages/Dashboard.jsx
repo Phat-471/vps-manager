@@ -44,6 +44,10 @@ export default function Dashboard() {
   const [healthLoading, setHealthLoading] = useState(false);
   const [restartingService, setRestartingService] = useState(null);
 
+  // Activity Logs state
+  const [logs, setLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
   const fetchChecklist = async () => {
     setLoadingChecklist(true);
     try {
@@ -193,6 +197,34 @@ export default function Dashboard() {
       console.error('Lỗi kiểm tra health:', err);
     } finally {
       setHealthLoading(false);
+    }
+  };
+
+  const fetchLogs = async () => {
+    if (!isConnected || !currentVPS) return;
+    setLogsLoading(true);
+    try {
+      const res = await apiCall('/api/logs/list', 'POST', { vpsId: currentVPS.id });
+      if (res.success) {
+        setLogs(res.data || []);
+      }
+    } catch (err) {
+      console.error('Lỗi tải nhật ký hoạt động:', err);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (!window.confirm('Bạn có chắc muốn xóa toàn bộ nhật ký hoạt động của Panel?')) return;
+    try {
+      const res = await apiCall('/api/logs/clear', 'POST');
+      if (res.success) {
+        showToast(res.message, 'success');
+        setLogs([]);
+      }
+    } catch (err) {
+      showToast('Lỗi khi xóa nhật ký: ' + err.message, 'error');
     }
   };
 
@@ -561,6 +593,7 @@ export default function Dashboard() {
     fetchChecklist();
     loadServiceHealth();
     fetchHistoryData();
+    fetchLogs();
 
     let isMonitoring = false;
 
@@ -992,6 +1025,73 @@ export default function Dashboard() {
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+
+      {/* Nhật ký hoạt động */}
+      <div className="card-glass mt-6 animate-fade-in" style={{ padding: '24px', marginTop: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h3 className="font-semibold text-sm tracking-wider uppercase text-gray-400 style-title flex items-center gap-2" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Activity size={16} className="text-indigo-400" />
+            Nhật ký hoạt động Panel (Activity Logs)
+          </h3>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={fetchLogs} disabled={logsLoading} className="btn btn-glass btn-xs" style={{ padding: '4px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <RotateCw size={12} className={logsLoading ? 'animate-spin' : ''} /> Làm mới
+            </button>
+            {logs.length > 0 && (
+              <button onClick={handleClearLogs} className="btn btn-glass btn-xs text-red-400" style={{ padding: '4px 10px', fontSize: '11px', background: 'rgba(239,68,68,0.1)', border: 'none' }}>
+                Xóa tất cả
+              </button>
+            )}
+          </div>
+        </div>
+
+        {logsLoading && logs.length === 0 ? (
+          <div className="text-center py-6 text-gray-400 text-sm">Đang tải nhật ký...</div>
+        ) : logs.length === 0 ? (
+          <div className="text-center py-6 text-gray-500 text-sm">Chưa ghi nhận hoạt động nào.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-muted)' }}>
+                  <th style={{ padding: '8px 12px', fontWeight: '600' }}>Thời gian</th>
+                  <th style={{ padding: '8px 12px', fontWeight: '600' }}>Hành động</th>
+                  <th style={{ padding: '8px 12px', fontWeight: '600' }}>Chi tiết</th>
+                  <th style={{ padding: '8px 12px', fontWeight: '600' }}>Người dùng</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.slice(0, 10).map((log) => (
+                  <tr key={log.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }}>
+                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontFamily: 'monospace', color: '#a5b4fc' }}>
+                      {new Date(log.timestamp).toLocaleString()}
+                    </td>
+                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                      <span style={{ 
+                        background: 'rgba(99,102,241,0.15)', 
+                        color: '#a5b4fc', 
+                        padding: '2px 6px', 
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: '500'
+                      }}>
+                        {log.action}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 12px', color: '#cbd5e1' }}>{log.details}</td>
+                    <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{log.username}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {logs.length > 10 && (
+              <div style={{ textAlign: 'center', marginTop: '12px', color: 'var(--text-muted)', fontSize: '11px' }}>
+                Hiển thị 10 trong tổng số {logs.length} hoạt động gần đây
+              </div>
+            )}
           </div>
         )}
       </div>

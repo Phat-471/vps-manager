@@ -1,5 +1,6 @@
 const { connectionPool } = require('../utils/ssh');
 const { escapeShellArg } = require('../utils/security');
+const { logActivity } = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
 
@@ -304,6 +305,7 @@ async function createBackup(req, res) {
             });
         }
 
+        logActivity('Tạo Bản sao lưu', `Đã tạo bản sao lưu ${type} (${type === 'dir' ? source : database})`, vpsConfig.id);
         res.json({
             success: true,
             message: 'Đã hoàn thành sao lưu thành công',
@@ -395,6 +397,7 @@ async function restoreBackup(req, res) {
             });
         }
 
+        logActivity('Khôi phục Bản sao lưu', `Đã khôi phục dữ liệu từ bản sao lưu: ${filename}`, vpsConfig.id);
         res.json({
             success: true,
             message: 'Khôi phục dữ liệu thành công!',
@@ -418,7 +421,7 @@ async function deleteBackup(req, res) {
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`rm -f ${BACKUP_DIR}/${escapeShellArg(filename)}`);
-
+        logActivity('Xóa Bản sao lưu', `Đã xóa tệp tin sao lưu: ${filename}`, vpsConfig.id);
         res.json({
             success: true,
             message: 'Đã xóa file sao lưu thành công'
@@ -469,7 +472,7 @@ async function installRclone(req, res) {
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
         const result = await ssh.executeCommand('curl https://rclone.org/install.sh | bash');
-        
+        logActivity('Cài đặt Rclone', 'Đã khởi chạy tiến trình cài đặt Rclone trên máy chủ', vpsConfig.id);
         res.json({
             success: true,
             message: 'Tiến trình cài đặt Rclone đã chạy',
@@ -702,7 +705,7 @@ async function saveRcloneRemote(req, res) {
         }
 
         await ssh.writeFile(configPath, newConfig);
-
+        logActivity('Cấu hình Rclone Remote', `Đã lưu cấu hình Cloud remote: "${name || 'raw config'}"`, vpsConfig.id);
         res.json({
             success: true,
             message: 'Đã lưu cấu hình remote thành công'
@@ -729,7 +732,7 @@ async function deleteRcloneRemote(req, res) {
 
         const newConfig = deleteIniSection(currentConfig, name);
         await ssh.writeFile(configPath, newConfig);
-
+        logActivity('Xóa Rclone Remote', `Đã xóa cấu hình Cloud remote: "${name}"`, vpsConfig.id);
         res.json({
             success: true,
             message: 'Đã xóa remote thành công'
@@ -789,6 +792,7 @@ async function syncFileToCloud(req, res) {
             });
         }
 
+        logActivity('Đồng bộ Cloud', `Đã tải tệp sao lưu ${filename} lên remote cloud ${rcloneRemote}`, vpsConfig.id);
         res.json({
             success: true,
             message: `Đã đồng bộ tệp ${filename} lên Cloud remote ${rcloneRemote} thành công!`

@@ -1,5 +1,6 @@
 const { connectionPool } = require('../utils/ssh');
 const { sanitizeAlphaNum, escapeShellArg, sanitizeNumber } = require('../utils/security');
+const { logActivity } = require('../utils/logger');
 
 async function listContainers(req, res) {
     try {
@@ -34,6 +35,7 @@ async function startContainer(req, res) {
         }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`docker start ${safeId}`);
+        logActivity('Khởi động Container', `Khởi động container Docker: ${id}`, vpsConfig.id);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 }
@@ -47,6 +49,7 @@ async function stopContainer(req, res) {
         }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`docker stop ${safeId}`);
+        logActivity('Dừng Container', `Dừng container Docker: ${id}`, vpsConfig.id);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 }
@@ -60,6 +63,7 @@ async function restartContainer(req, res) {
         }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`docker restart ${safeId}`);
+        logActivity('Khởi động lại Container', `Khởi động lại container Docker: ${id}`, vpsConfig.id);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 }
@@ -73,6 +77,7 @@ async function removeContainer(req, res) {
         }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand(`docker rm -f ${safeId}`);
+        logActivity('Xóa Container', `Xóa container Docker: ${id}`, vpsConfig.id);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 }
@@ -95,6 +100,7 @@ async function pruneDocker(req, res) {
         const { vpsConfig } = req.body;
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         await ssh.executeCommand('docker system prune -f');
+        logActivity('Dọn dẹp Docker', 'Dọn dẹp các container/image/volume không sử dụng', vpsConfig.id);
         res.json({ success: true });
     } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 }

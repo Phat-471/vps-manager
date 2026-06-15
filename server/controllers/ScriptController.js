@@ -1,4 +1,5 @@
 const { connectionPool } = require('../utils/ssh');
+const { logActivity } = require('../utils/logger');
 
 // Configuration for common scripts and installers
 const SCRIPTS = {
@@ -542,7 +543,7 @@ async function runScript(req, res) {
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
         const result = await ssh.executeCommand(command);
-
+        logActivity('Chạy Script', `Đã thực thi kịch bản: "${script.name}"`, vpsConfig.id);
         res.json({
             success: true,
             output: result.stdout + result.stderr

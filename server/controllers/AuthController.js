@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { logActivity } = require('../utils/logger');
 
 // Tạo secret key ngẫu nhiên khi khởi động server
 const JWT_SECRET = crypto.randomBytes(32).toString('hex');
@@ -100,8 +101,10 @@ function login(req, res) {
 
         if (verifyPassword(password, requiredPassword)) {
             const token = generateToken();
+            logActivity('Đăng nhập Panel', 'Đăng nhập Panel thành công');
             return res.json({ success: true, token });
         } else {
+            logActivity('Đăng nhập thất bại', 'Thử đăng nhập Panel thất bại (sai mật khẩu)');
             return res.status(401).json({ success: false, error: 'Mật khẩu đăng nhập Panel không chính xác' });
         }
     } catch (err) {
@@ -154,8 +157,83 @@ function setup(req, res) {
 
         // Tạo token đăng nhập mới luôn cho phiên làm việc hiện tại
         const token = generateToken();
-
+        logActivity('Thiết lập Panel', 'Thiết lập mật khẩu bảo mật Panel thành công');
         return res.json({ success: true, message: 'Thiết lập mật khẩu bảo mật Panel thành công', token });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+/**
+ * Đảm bảo khóa mã hóa PANEL_ENCRYPTION_KEY tồn tại trong tệp .env
+ */
+function ensureEncryptionKey() {
+    const fs = require('fs');
+    const path = require('path');
+    const envPath = path.join(__dirname, '../../.env');
+    
+    if (process.env.PANEL_ENCRYPTION_KEY) {
+        return process.env.PANEL_ENCRYPTION_KEY;
+    }
+    
+    let envContent = '';
+    if (fs.existsSync(envPath)) {
+        envContent = fs.readFileSync(envPath, 'utf8');
+    }
+    
+    const lines = envContent.split('\n');
+    let foundKey = null;
+    let foundIndex = -1;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line.startsWith('PANEL_ENCRYPTION_KEY=')) {
+            foundKey = line.split('=')[1].trim().replace(/^['"]|['"]$/g, '');
+            foundIndex = i;
+            break;
+        }
+    }
+    
+    if (foundKey) {
+        process.env.PANEL_ENCRYPTION_KEY = foundKey;
+        return foundKey;
+    }
+    
+    // Tạo khóa ngẫu nhiên 32-byte
+    const newKey = crypto.randomBytes(32).toString('hex');
+    if (foundIndex >= 0) {
+        lines[foundIndex] = `PANEL_ENCRYPTION_KEY=${newKey}`;
+    } else {
+        lines.push(`PANEL_ENCRYPTION_KEY=${newKey}`);
+    }
+    
+    fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
+    process.env.PANEL_ENCRYPTION_KEY = newKey;
+    return newKey;
+}
+
+// Gọi ngay khi load module
+ensureEncryptionKey();
+
+/**
+ * API: Lấy khóa mã hóa của Panel
+ */
+function getEncryptionKey(req, res) {
+    try {
+        const isProtected = !!process.env.PANEL_PASSWORD;
+        if (isProtected) {
+            const authHeader = req.headers.authorization;
+            if (!authHeader || !authHeader.startsWith('Bearer ')) {
+                return res.status(401).json({ success: false, error: 'Chưa đăng nhập Panel' });
+            }
+            const token = authHeader.split(' ')[1];
+            if (!verifyToken(token)) {
+                return res.status(401).json({ success: false, error: 'Phiên làm việc không hợp lệ' });
+            }
+        }
+
+        const key = ensureEncryptionKey();
+        res.json({ success: true, key });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -165,5 +243,7 @@ module.exports = {
     checkStatus,
     login,
     setup,
-    verifyToken
+    verifyToken,
+    getEncryptionKey
 };
+

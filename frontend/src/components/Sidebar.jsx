@@ -22,7 +22,8 @@ import {
   Rocket,
   Webhook,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Cloud
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -77,7 +78,8 @@ export default function Sidebar() {
       title: 'Cấu hình & Bảo trì',
       items: [
         { id: 'security', label: 'Bảo mật', icon: Shield },
-        { id: 'scheduler', label: 'Lập lịch & Sao lưu', icon: Clock },
+        { id: 'scheduler', label: 'Lập lịch Cron', icon: Clock },
+        { id: 'backups', label: 'Sao lưu & Đám mây', icon: Cloud },
         { id: 'scripts', label: 'Chạy Scripts', icon: TerminalSquare },
         { id: 'webhooks', label: 'Git Webhooks', icon: Webhook },
         { id: 'maintenance', label: 'Bảo trì hệ thống', icon: Wrench }

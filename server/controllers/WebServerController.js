@@ -1,5 +1,6 @@
 const { connectionPool } = require('../utils/ssh');
 const { sanitizeAlphaNum, escapeShellArg, sanitizeNumber } = require('../utils/security');
+const { logActivity } = require('../utils/logger');
 
 async function listSites(req, res) {
     try {
@@ -161,6 +162,7 @@ EOF`);
         // Test and reload nginx
         await ssh.executeCommand('nginx -t && systemctl reload nginx');
 
+        logActivity('Tạo Website', `Đã thêm website ${domain} (loại: ${type})`, vpsConfig.id);
         res.json({
             success: true,
             message: 'Đã thêm website thành công'
@@ -187,6 +189,7 @@ async function deleteSite(req, res) {
         await ssh.executeCommand(`rm -f /etc/nginx/sites-available/${safeDomain}`);
         await ssh.executeCommand('systemctl reload nginx');
 
+        logActivity('Xóa Website', `Đã xóa website ${domain}`, vpsConfig.id);
         res.json({
             success: true,
             message: 'Đã xóa website thành công'
@@ -234,6 +237,7 @@ EOF`);
         }
 
         await ssh.executeCommand('systemctl reload nginx');
+        logActivity('Sửa cấu hình Nginx', `Đã cập nhật tệp tin cấu hình Nginx cho ${domain}`, vpsConfig.id);
         res.json({ success: true, message: 'Config saved and Nginx reloaded' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -256,6 +260,7 @@ async function toggleSite(req, res) {
         }
 
         await ssh.executeCommand('systemctl reload nginx');
+        logActivity('Bật/Tắt Website', `Đã ${enable ? 'bật' : 'tắt'} website ${domain}`, vpsConfig.id);
         res.json({ success: true, message: enable ? 'Site enabled' : 'Site disabled' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -274,6 +279,7 @@ async function installSSL(req, res) {
         const safeEmail = escapeShellArg(email || 'admin@' + safeDomain);
         const result = await ssh.executeCommand(`certbot --nginx -d ${safeDomain} --non-interactive --agree-tos -m ${safeEmail}`);
 
+        logActivity('Cài đặt SSL', `Cài đặt chứng chỉ SSL Let's Encrypt cho ${domain}`, vpsConfig.id);
         res.json({ success: true, data: result.stdout });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });

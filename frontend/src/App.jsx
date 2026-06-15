@@ -23,6 +23,7 @@ import NodeConfig from './pages/NodeConfig';
 import MailConfig from './pages/MailConfig';
 import AppInstaller from './pages/AppInstaller';
 import Webhooks from './pages/Webhooks';
+import Backups from './pages/Backups';
 import './index.css';
 
 const pageMap = {
@@ -37,6 +38,7 @@ const pageMap = {
   files: <FileManager />,
   security: <Security />,
   scheduler: <Scheduler />,
+  backups: <Backups />,
   alerts: <Alerts />,
   phpconfig: <PHPConfig />,
   nodeconfig: <NodeConfig />,

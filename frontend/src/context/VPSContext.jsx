@@ -17,27 +17,130 @@ export const VPSProvider = ({ children }) => {
   const [isPanelProtected, setIsPanelProtected] = useState(false);
   const [isPanelAuthenticated, setIsPanelAuthenticated] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
+  const [encryptionKey, setEncryptionKey] = useState('');
 
   // Helper password methods
-  const decryptPassword = (encrypted) => {
+  const decryptPassword = (encrypted, customKey) => {
+    const key = customKey || encryptionKey || 'vps-manager-secret';
     try {
-      const bytes = CryptoJS.AES.decrypt(encrypted, 'vps-manager-secret');
-      return bytes.toString(CryptoJS.enc.Utf8);
+      const bytes = CryptoJS.AES.decrypt(encrypted, key);
+      const dec = bytes.toString(CryptoJS.enc.Utf8);
+      if (dec) return dec;
+      
+      // Fallback nếu dùng key động lỗi, thử key cũ
+      if (key !== 'vps-manager-secret') {
+        const fallbackBytes = CryptoJS.AES.decrypt(encrypted, 'vps-manager-secret');
+        return fallbackBytes.toString(CryptoJS.enc.Utf8) || encrypted;
+      }
+      return encrypted;
     } catch {
+      // Fallback
+      if (key !== 'vps-manager-secret') {
+        try {
+          const fallbackBytes = CryptoJS.AES.decrypt(encrypted, 'vps-manager-secret');
+          return fallbackBytes.toString(CryptoJS.enc.Utf8) || encrypted;
+        } catch {
+          return encrypted;
+        }
+      }
       return encrypted;
     }
   };
 
-  const encryptPassword = (password) => {
-    return CryptoJS.AES.encrypt(password, 'vps-manager-secret').toString();
+  const encryptPassword = (password, customKey) => {
+    const key = customKey || encryptionKey || 'vps-manager-secret';
+    return CryptoJS.AES.encrypt(password, key).toString();
+  };
+
+  const fetchEncryptionKey = async (token) => {
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      const currentToken = token || localStorage.getItem('panelToken');
+      if (currentToken) {
+        headers['Authorization'] = `Bearer ${currentToken}`;
+      }
+      const response = await fetch('/api/auth/encryption-key', {
+        method: 'POST',
+        headers
+      });
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.key) {
+          setEncryptionKey(result.key);
+          return result.key;
+        }
+      }
+    } catch (err) {
+      console.error('Lỗi lấy khóa mã hóa từ server:', err);
+    }
+    return '';
+  };
+
+  const reloadVPSList = (key) => {
+    const saved = localStorage.getItem('vpsList');
+    const list = saved ? JSON.parse(saved) : [];
+    
+    let listChanged = false;
+    const migratedList = list.map(vps => {
+      try {
+        let decrypted = '';
+        let isOldKey = false;
+        
+        if (key && key !== 'vps-manager-secret') {
+          try {
+            const bytes = CryptoJS.AES.decrypt(vps.password, key);
+            decrypted = bytes.toString(CryptoJS.enc.Utf8);
+          } catch (e) {
+            decrypted = '';
+          }
+        }
+        
+        if (!decrypted) {
+          try {
+            const bytes = CryptoJS.AES.decrypt(vps.password, 'vps-manager-secret');
+            decrypted = bytes.toString(CryptoJS.enc.Utf8);
+            if (decrypted) {
+              isOldKey = true;
+            }
+          } catch (e) {
+            decrypted = '';
+          }
+        }
+        
+        if (decrypted && isOldKey && key) {
+          vps.password = CryptoJS.AES.encrypt(decrypted, key).toString();
+          listChanged = true;
+        }
+      } catch (err) {
+        console.error('Lỗi di trú mật khẩu VPS:', err);
+      }
+      return vps;
+    });
+
+    if (listChanged) {
+      localStorage.setItem('vpsList', JSON.stringify(migratedList));
+    }
+    setVpsList(migratedList);
+
+    const lastVPSId = localStorage.getItem('lastVPSId');
+    if (migratedList.length > 0) {
+      const savedVPS = migratedList.find(v => v.id === lastVPSId) || migratedList[0];
+      const decryptedPass = decryptPassword(savedVPS.password, key);
+      connectToVPS({ ...savedVPS, password: decryptedPass });
+    } else {
+      setActivePage('vps-modal'); // Force connection screen
+    }
   };
 
   // Check panel authentication and load saved VPS on mount
   useEffect(() => {
     const checkPanelAuthAndLoad = async () => {
+      let isProtected = false;
+      let isAuthenticated = true;
+      const token = localStorage.getItem('panelToken');
+
       // 1. Check Panel Protection Status
       try {
-        const token = localStorage.getItem('panelToken');
         const headers = { 'Content-Type': 'application/json' };
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
@@ -49,9 +152,11 @@ export const VPSProvider = ({ children }) => {
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
-            setIsPanelProtected(result.required);
-            setIsPanelAuthenticated(result.authenticated);
-            if (!result.authenticated && token) {
+            isProtected = result.required;
+            isAuthenticated = result.authenticated;
+            setIsPanelProtected(isProtected);
+            setIsPanelAuthenticated(isAuthenticated);
+            if (!isAuthenticated && token) {
               localStorage.removeItem('panelToken');
               setPanelToken('');
             }
@@ -63,20 +168,14 @@ export const VPSProvider = ({ children }) => {
         setAuthChecked(true);
       }
 
-      // 2. Load saved VPS list
-      const saved = localStorage.getItem('vpsList');
-      const list = saved ? JSON.parse(saved) : [];
-      setVpsList(list);
-
-      const lastVPSId = localStorage.getItem('lastVPSId');
-      if (list.length > 0) {
-        const savedVPS = list.find(v => v.id === lastVPSId) || list[0];
-        // Decrypt password
-        const decryptedPass = decryptPassword(savedVPS.password);
-        connectToVPS({ ...savedVPS, password: decryptedPass });
-      } else {
-        setActivePage('vps-modal'); // Force connection screen
+      // 2. Fetch Encryption Key
+      let key = '';
+      if (isAuthenticated || !isProtected) {
+        key = await fetchEncryptionKey(isAuthenticated ? token : null);
       }
+
+      // 3. Load list and reconnect
+      reloadVPSList(key);
     };
 
     checkPanelAuthAndLoad();
@@ -168,17 +267,21 @@ export const VPSProvider = ({ children }) => {
   };
 
   // Panel login/logout actions
-  const loginPanel = (token) => {
+  const loginPanel = async (token) => {
     localStorage.setItem('panelToken', token);
     setPanelToken(token);
     setIsPanelAuthenticated(true);
     showToast('Đăng nhập thành công', 'success');
+    
+    const key = await fetchEncryptionKey(token);
+    reloadVPSList(key);
   };
 
   const logoutPanel = () => {
     localStorage.removeItem('panelToken');
     setPanelToken('');
     setIsPanelAuthenticated(false);
+    setEncryptionKey('');
     showToast('Đã đăng xuất khỏi Panel', 'info');
   };
 
@@ -198,6 +301,9 @@ export const VPSProvider = ({ children }) => {
         setIsPanelProtected(true);
         setIsPanelAuthenticated(true);
         showToast('Thiết lập mật khẩu bảo mật Panel thành công', 'success');
+        
+        const key = await fetchEncryptionKey(result.token);
+        reloadVPSList(key);
         return { success: true };
       } else {
         throw new Error(result.error || 'Thiết lập mật khẩu thất bại');
