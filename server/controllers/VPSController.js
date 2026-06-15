@@ -61,7 +61,7 @@ async function testConnection(req, res) {
                 errorMessage = 'VPS từ chối kết nối - Kiểm tra SSH service';
             }
 
-            res.status(401).json({
+            res.status(400).json({
                 success: false,
                 error: errorMessage,
                 details: err.message
