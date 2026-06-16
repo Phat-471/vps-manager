@@ -382,6 +382,39 @@ async function fullSystemUpdate(req, res) {
 }
 
 /**
+ * Tự động cập nhật mã nguồn Panel từ Git (update.sh)
+ */
+async function updatePanel(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        res.json({
+            success: true,
+            message: 'Tiến trình cập nhật Panel đang chạy ngầm. Hệ thống sẽ khởi động lại và tự tải lại trang sau khoảng 5-10 giây...'
+        });
+
+        // Chạy lệnh cập nhật ngầm sau 1 giây
+        setTimeout(async () => {
+            try {
+                console.log('Đang chạy cập nhật Panel qua update.sh...');
+                // Chạy script update.sh của panel
+                await ssh.executeCommand('chmod +x /var/www/vps-manager/update.sh && bash /var/www/vps-manager/update.sh > /var/log/vps-manager-update.log 2>&1');
+            } catch (err) {
+                console.error('Lỗi khi chạy update.sh:', err.message);
+            }
+        }, 1000);
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+}
+
+
+/**
  * Khởi động lại VPS (Reboot)
  */
 async function rebootVPS(req, res) {
@@ -640,5 +673,6 @@ module.exports = {
     changeRootPassword,
     getSetupChecklist,
     getServiceHealth,
-    quickRestartService
+    quickRestartService,
+    updatePanel
 };

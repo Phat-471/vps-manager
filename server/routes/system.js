@@ -17,6 +17,7 @@ router.post('/kill-process', SystemController.killProcess); // Changed from '/pr
 router.post('/clean-packages', SystemController.cleanPackages);
 router.post('/reset-applications', SystemController.resetApplications);
 router.post('/full-update', SystemController.fullSystemUpdate);
+router.post('/update-panel', SystemController.updatePanel);
 
 // New quick action routes
 router.post('/reboot', SystemController.rebootVPS);

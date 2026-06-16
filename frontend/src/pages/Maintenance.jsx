@@ -67,6 +67,26 @@ export default function Maintenance() {
     }
   };
 
+  const handleUpdatePanel = async () => {
+    if (!window.confirm('Cập nhật Panel sẽ tải mã nguồn mới nhất từ Git, cài đặt thư viện và khởi động lại ứng dụng qua PM2.\n\nQuá trình này sẽ tạm ngắt kết nối Panel trong vài giây. Bạn có chắc chắn muốn cập nhật?')) return;
+    setInstallingKey('panel-update');
+    try {
+      showToast('Bắt đầu tải bản cập nhật mới nhất cho Panel...', 'info');
+      const res = await apiCall('/api/system/update-panel', 'POST');
+      if (res.success) {
+        showToast(res.message, 'success');
+        // Đợi 6 giây rồi reload lại trang
+        setTimeout(() => {
+          window.location.reload();
+        }, 6000);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setInstallingKey(null);
+    }
+  };
+
   const handleInstallSoftware = async (software) => {
     setInstallingKey(software.key);
     try {
@@ -149,6 +169,18 @@ export default function Maintenance() {
             >
               <RefreshCw size={14} className={installingKey === 'os-update' ? 'animate-spin' : ''} />
               {installingKey === 'os-update' ? 'Đang cập nhật...' : 'Cập nhật hệ thống'}
+            </button>
+          </div>
+          
+          <div className="pt-3 border-t border-white/5 mt-3">
+            <button
+              onClick={handleUpdatePanel}
+              disabled={installingKey !== null}
+              className="btn btn-glass btn-block text-green-300"
+              style={{ padding: '10px' }}
+            >
+              <RefreshCw size={14} className={installingKey === 'panel-update' ? 'animate-spin' : ''} />
+              {installingKey === 'panel-update' ? 'Đang cập nhật...' : 'Cập nhật VPS Manager Panel'}
             </button>
           </div>
         </div>
