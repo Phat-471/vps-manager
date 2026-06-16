@@ -123,6 +123,11 @@ echo -e "${YELLOW}1. Đang cập nhật danh sách gói hệ thống...${NC}"
 apt-get update -y
 
 echo -e "${YELLOW}2. Cài đặt các công cụ cơ bản (Git, Curl, Wget, Cron)...${NC}"
+# Giải phóng thuộc tính chống ghi (immutable) nếu có trên các thư mục/tệp tin hệ thống
+if command -v chattr &>/dev/null; then
+    chattr -i /usr/bin /usr/sbin /bin /sbin 2>/dev/null || true
+    chattr -i /usr/bin/wget /usr/bin/curl /usr/bin/git /usr/bin/unzip /usr/bin/funzip 2>/dev/null || true
+fi
 apt-get install -y git curl wget unzip cron
 
 # Đảm bảo dịch vụ cron được kích hoạt và chạy nền
