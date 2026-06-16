@@ -37,6 +37,26 @@ else
     echo -e "${GREEN}Node.js đã được cài đặt: $(node -v)${NC}"
 fi
 
+# Kiểm tra nếu đã cài đặt VPS Manager từ trước
+if [ -d /var/www/vps-manager ]; then
+    echo -e "${YELLOW}Cảnh báo: VPS Manager đã được cài đặt trên hệ thống này (/var/www/vps-manager).${NC}"
+    echo -e "${RED}CÀI ĐẶT LẠI SẼ XÓA SẠCH TOÀN BỘ DỮ LIỆU HIỆN CÓ CỦA PANEL!${NC}"
+    echo -n "Bạn có chắc chắn muốn xóa sạch dữ liệu cũ và tiến hành cài đặt lại không? (y/n): "
+    read -r CONFIRM_REINSTALL
+    
+    if [ "$CONFIRM_REINSTALL" != "y" ] && [ "$CONFIRM_REINSTALL" != "Y" ]; then
+        echo -e "${BLUE}Đã hủy quá trình cài đặt lại theo yêu cầu của bạn.${NC}"
+        exit 0
+    fi
+    echo -e "${YELLOW}Đang gỡ bỏ cấu hình và dữ liệu cũ...${NC}"
+    # Gỡ PM2 process cũ
+    pm2 delete vps-manager 2>/dev/null || true
+    pm2 save --force 2>/dev/null || pm2 save 2>/dev/null || true
+    # Xóa thư mục nguồn cũ
+    rm -rf /var/www/vps-manager
+    echo -e "${GREEN}Đã xóa sạch dữ liệu cũ. Bắt đầu cài đặt mới...${NC}"
+fi
+
 echo -e "${YELLOW}4. Đang cài đặt mã nguồn VPS Manager...${NC}"
 # Tạo thư mục và tải code từ Git
 GIT_REPO="https://github.com/Phat-471/vps-manager.git"
