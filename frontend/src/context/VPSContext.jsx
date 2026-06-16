@@ -78,7 +78,23 @@ export const VPSProvider = ({ children }) => {
 
   const reloadVPSList = (key) => {
     const saved = localStorage.getItem('vpsList');
-    const list = saved ? JSON.parse(saved) : [];
+    let list = saved ? JSON.parse(saved) : [];
+    
+    // Tự động thêm Local VPS (Native Mode) nếu danh sách trống để vào thẳng dashboard
+    if (list.length === 0) {
+      const keyToUse = key || encryptionKey || 'vps-manager-secret';
+      const localPwd = CryptoJS.AES.encrypt('local-dummy-password', keyToUse).toString();
+      const defaultLocal = {
+        id: 'vps_local',
+        name: 'Local VPS (Native)',
+        host: 'localhost',
+        port: 22,
+        username: 'root',
+        password: localPwd
+      };
+      list = [defaultLocal];
+      localStorage.setItem('vpsList', JSON.stringify(list));
+    }
     
     let listChanged = false;
     const migratedList = list.map(vps => {
