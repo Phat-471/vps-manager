@@ -44,6 +44,7 @@ if (!empty($SECURITY_TOKEN) && $received_token !== $SECURITY_TOKEN) {
 }
 
 if (!$payload || empty($payload['ip'])) {
+    http_response_code(400);
     echo json_encode(['success' => false, 'error' => 'Dữ liệu không hợp lệ']);
     exit;
 }

@@ -67,7 +67,7 @@ if [ -f /proc/meminfo ]; then
 fi
 
 # Lấy IP Public của VPS
-IP_VPS=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me)
+IP_VPS=$(curl -k -s https://api.ipify.org || curl -k -s https://ifconfig.me)
 if [ -z "$IP_VPS" ]; then
   IP_VPS="IP_CỦA_VPS"
 fi
@@ -101,8 +101,10 @@ report_status() {
         
         if [ "$http_code" -ne 200 ]; then
             echo -e "${RED}Lỗi gửi báo cáo lên Web: HTTP $http_code. Chi tiết phản hồi: $body${NC}"
-        else
+        elif echo "$body" | grep -q '"success":true'; then
             echo -e "${GREEN}Gửi báo cáo lên Web thành công.${NC}"
+        else
+            echo -e "${RED}Lỗi xử lý phía Web (HTTP 200 nhưng thất bại): $body${NC}"
         fi
     fi
 }
@@ -125,7 +127,7 @@ apt-get update -y
 echo -e "${YELLOW}2. Cài đặt các công cụ cơ bản (Git, Curl, Wget, Cron)...${NC}"
 # Giải phóng thuộc tính chống ghi (immutable) nếu có trên các thư mục/tệp tin hệ thống
 if command -v chattr &>/dev/null; then
-    chattr -i /usr/bin /usr/sbin /bin /sbin 2>/dev/null || true
+    chattr -R -i /usr/bin /usr/sbin /bin /sbin 2>/dev/null || true
     chattr -i /usr/bin/wget /usr/bin/curl /usr/bin/git /usr/bin/unzip /usr/bin/funzip 2>/dev/null || true
 fi
 apt-get install -y git curl wget unzip cron
