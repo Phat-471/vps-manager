@@ -49,6 +49,7 @@ export default function Sidebar() {
       title: 'Hệ thống & Giám sát',
       items: [
         { id: 'dashboard', label: 'Tổng quan', icon: Gauge },
+        { id: 'centralmonitor', label: 'Giám sát trung tâm', icon: Cloud },
         { id: 'stats', label: 'Thống kê truy cập', icon: BarChart2 },
         { id: 'terminal', label: 'Terminal (SSH)', icon: Terminal },
         { id: 'alerts', label: 'Cảnh báo hệ thống', icon: Bell }

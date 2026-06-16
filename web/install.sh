@@ -9,15 +9,61 @@ NC='\033[0m' # Không màu
 
 # URL của Web Panel trung tâm (Sẽ được index.php thay thế tự động khi tải về)
 PANEL_URL="PANEL_URL_PLACEHOLDER"
+# Token xác thực bảo mật với Web Panel trung tâm (Sẽ được index.php thay thế)
+TOKEN="SECURITY_TOKEN_PLACEHOLDER"
 
 echo -e "${BLUE}==================================================${NC}"
 echo -e "${GREEN}      TRÌNH CÀI ĐẶT VPS MANAGER PANEL TỰ ĐỘNG      ${NC}"
 echo -e "${BLUE}==================================================${NC}"
 
+# Kiểm tra chạy bằng bash
+if [ -z "$BASH_VERSION" ]; then
+  echo -e "\033[0;31mLỗi: Script này phải được chạy bằng bash, không phải sh.\033[0m"
+  echo -e "Vui lòng chạy lại bằng lệnh: \033[0;32mcurl -sSL https://hoangphat.site/web | bash\033[0m"
+  exit 1
+fi
+
 # Kiểm tra quyền root
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}Lỗi: Vui lòng chạy script này dưới quyền root (sudo bash).${NC}"
   exit 1
+fi
+
+# Kiểm tra bộ nhớ RAM và cấu hình Swap nếu RAM quá thấp (< 1.5GB) và không có Swap đủ lớn
+if [ -f /proc/meminfo ]; then
+  TOTAL_RAM=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+  TOTAL_SWAP=$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo)
+  
+  # Luôn đề xuất tạo Swap nếu tổng lượng Swap nhỏ hơn 1GB để cài đặt không bị OOM Killed
+  if [ -z "$TOTAL_SWAP" ] || [ "$TOTAL_SWAP" -lt 1000 ]; then
+    echo -e "${YELLOW}Cảnh báo: VPS của bạn chưa có đủ bộ nhớ ảo Swap ($TOTAL_SWAP MB) (RAM hiện tại: $TOTAL_RAM MB).${NC}"
+    echo -e "${YELLOW}Điều này dễ khiến hệ điều hành tự động tắt tiến trình (Killed) khi cập nhật hoặc cài PM2/Node.js.${NC}"
+    echo -n "Bạn có muốn tự động tạo/tăng tệp Swap lên 1GB để cài đặt ổn định hơn không? (y/n): "
+    if [ -t 0 ]; then
+      read -r SWAP_DECISION
+    elif [ -c /dev/tty ]; then
+      read -r SWAP_DECISION </dev/tty
+    else
+      SWAP_DECISION="y"
+    fi
+    if [ "$SWAP_DECISION" = "y" ] || [ "$SWAP_DECISION" = "Y" ]; then
+      echo -e "${BLUE}Đang khởi tạo tệp Swap 1GB...${NC}"
+      # Tắt swap cũ nếu trùng tên tệp tin để tránh lỗi ghi đè hoạt động
+      swapoff /swapfile 2>/dev/null || true
+      fallocate -l 1G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=1024 2>/dev/null
+      chmod 600 /swapfile
+      mkswap /swapfile >/dev/null
+      swapon /swapfile >/dev/null
+      if grep -q "/swapfile" /etc/fstab; then
+        echo -e "${GREEN}Đã ghi nhận Swap trong cấu hình khởi động.${NC}"
+      else
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      fi
+      echo -e "${GREEN}Đã kích hoạt Swap 1GB thành công!${NC}"
+    else
+      echo -e "${YELLOW}Bỏ qua cấu hình Swap. Quá trình cài đặt tiếp tục...${NC}"
+    fi
+  fi
 fi
 
 # Lấy IP Public của VPS
@@ -39,10 +85,25 @@ report_status() {
     local pw="$4"
     local os_name="$5"
     
-    if [ -n "$PANEL_URL" ] && [ "$PANEL_URL" != "PANEL_URL_PLACEHOLDER" ]; then
-        curl -s -X POST "$PANEL_URL/log.php" \
+    if [ -n "$PANEL_URL" ] && [ "$PANEL_URL" != "PANEL_URL_""PLACEHOLDER" ]; then
+        echo -e "${BLUE}Đang gửi báo cáo trạng thái về Web Panel: $status...${NC}"
+        # Thực hiện gọi curl, lưu lại cả HTTP status code và response body
+        local res
+        res=$(curl -k -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$PANEL_URL/log.php" \
              -H "Content-Type: application/json" \
-             -d "{\"ip\":\"$IP_VPS\",\"status\":\"$status\",\"message\":\"$msg\",\"port\":\"$port\",\"password\":\"$pw\",\"os\":\"$os_name\"}" >/dev/null 2>&1
+             -H "X-Secure-Token: $TOKEN" \
+             -d "{\"ip\":\"$IP_VPS\",\"status\":\"$status\",\"message\":\"$msg\",\"port\":\"$port\",\"password\":\"$pw\",\"os\":\"$os_name\"}")
+             
+        local http_code
+        http_code=$(echo "$res" | grep "HTTP_STATUS" | cut -d':' -f2)
+        local body
+        body=$(echo "$res" | grep -v "HTTP_STATUS")
+        
+        if [ "$http_code" -ne 200 ]; then
+            echo -e "${RED}Lỗi gửi báo cáo lên Web: HTTP $http_code. Chi tiết phản hồi: $body${NC}"
+        else
+            echo -e "${GREEN}Gửi báo cáo lên Web thành công.${NC}"
+        fi
     fi
 }
 
@@ -61,8 +122,16 @@ trap 'error_handler $LINENO' ERR
 echo -e "${YELLOW}1. Đang cập nhật danh sách gói hệ thống...${NC}"
 apt-get update -y
 
-echo -e "${YELLOW}2. Cài đặt các công cụ cơ bản (Git, Curl, Wget)...${NC}"
-apt-get install -y git curl wget unzip
+echo -e "${YELLOW}2. Cài đặt các công cụ cơ bản (Git, Curl, Wget, Cron)...${NC}"
+apt-get install -y git curl wget unzip cron
+
+# Đảm bảo dịch vụ cron được kích hoạt và chạy nền
+if command -v systemctl &>/dev/null; then
+    systemctl enable cron 2>/dev/null || true
+    systemctl start cron 2>/dev/null || true
+else
+    service cron start 2>/dev/null || true
+fi
 
 echo -e "${YELLOW}3. Cài đặt Node.js & NPM (Phiên bản LTS)...${NC}"
 if ! command -v node &> /dev/null; then
@@ -77,7 +146,13 @@ echo -e "${YELLOW}4. Đang cài đặt mã nguồn VPS Manager...${NC}"
 GIT_REPO="https://github.com/Phat-471/vps-manager.git"
 
 echo -e "Nhập link Git chứa code của bạn (Bấm Enter để dùng mặc định: $GIT_REPO):"
-read -r INPUT_REPO
+if [ -t 0 ]; then
+    read -r INPUT_REPO
+elif [ -c /dev/tty ]; then
+    read -r INPUT_REPO </dev/tty
+else
+    INPUT_REPO=""
+fi
 if [ -n "$INPUT_REPO" ]; then
     GIT_REPO="$INPUT_REPO"
 fi
@@ -111,7 +186,13 @@ done
 
 echo -e "Chúng tôi đề xuất chạy Panel trên cổng ngẫu nhiên bảo mật: ${GREEN}$RANDOM_PORT${NC}"
 echo -e "Nhập cổng bạn muốn sử dụng (Bấm Enter để dùng cổng đề xuất: $RANDOM_PORT):"
-read -r INPUT_PORT
+if [ -t 0 ]; then
+    read -r INPUT_PORT
+elif [ -c /dev/tty ]; then
+    read -r INPUT_PORT </dev/tty
+else
+    INPUT_PORT=""
+fi
 if [ -n "$INPUT_PORT" ] && [[ "$INPUT_PORT" =~ ^[0-9]+$ ]]; then
     PORT="$INPUT_PORT"
 else
@@ -119,7 +200,13 @@ else
 fi
 
 echo -e "Nhập mật khẩu Panel bạn muốn đặt (Tối thiểu 6 ký tự, nhập ẩn, bấm Enter để tự động tạo):"
-read -r -s PANEL_PW
+if [ -t 0 ]; then
+    read -r -s PANEL_PW
+elif [ -c /dev/tty ]; then
+    read -r -s PANEL_PW </dev/tty
+else
+    PANEL_PW=""
+fi
 if [ -z "$PANEL_PW" ]; then
     # Tạo mật khẩu ngẫu nhiên 12 ký tự an toàn
     PANEL_PW=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
@@ -127,7 +214,13 @@ if [ -z "$PANEL_PW" ]; then
 else
     while [ ${#PANEL_PW} -lt 6 ]; do
         echo -e "${RED}Mật khẩu quá ngắn, vui lòng nhập lại (Tối thiểu 6 ký tự):${NC}"
-        read -r -s PANEL_PW
+        if [ -t 0 ]; then
+            read -r -s PANEL_PW
+        elif [ -c /dev/tty ]; then
+            read -r -s PANEL_PW </dev/tty
+        else
+            break
+        fi
     done
 fi
 
@@ -162,21 +255,32 @@ RAM_USED=$(free -m | awk '/Mem:/ {print $3}')
 RAM_PERCENT=$(awk "BEGIN {print ($RAM_USED/$RAM_TOTAL)*100}")
 DISK_PERCENT=$(df -h / | awk 'NR==2 {print $5}' | tr -d '%')
 
-# Đọc thống kê truyền tải mạng qua interface mặc định
-INTERFACE=$(ip route show | awk '/default/ {print $5}')
+# Đọc thống kê truyền tải mạng qua interface mặc định (tìm thông minh card mạng kết nối Internet)
+INTERFACE=$(ip route show | grep default | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -n1)
+if [ -z "$INTERFACE" ]; then
+    INTERFACE=$(ip link show | awk -F': ' '/state UP/ {print $2}' | head -n1)
+fi
+if [ -z "$INTERFACE" ]; then
+    INTERFACE="eth0"
+fi
+
 RX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/rx_bytes 2>/dev/null || echo 0)
 TX_BYTES=$(cat /sys/class/net/$INTERFACE/statistics/tx_bytes 2>/dev/null || echo 0)
 
 PANEL_URL="PANEL_URL_PLACEHOLDER"
-if [ -n "$PANEL_URL" ] && [ "$PANEL_URL" != "PANEL_URL_PLACEHOLDER" ]; then
-    curl -s -X POST "$PANEL_URL/monitor.php" \
+TOKEN="SECURITY_TOKEN_PLACEHOLDER"
+
+if [ -n "$PANEL_URL" ] && [ "$PANEL_URL" != "PANEL_URL_""PLACEHOLDER" ]; then
+    curl -k -s -X POST "$PANEL_URL/monitor.php" \
          -H "Content-Type: application/json" \
+         -H "X-Secure-Token: $TOKEN" \
          -d "{\"ip\":\"$IP_VPS\",\"cpu\":$CPU_USAGE,\"ram\":$RAM_PERCENT,\"disk\":$DISK_PERCENT,\"rx\":$RX_BYTES,\"tx\":$TX_BYTES}" >/dev/null 2>&1
 fi
 EOF
 
-# Thay thế URL callback trong script giám sát
+# Thay thế URL callback và Token trong script giám sát
 sed -i "s|PANEL_URL_PLACEHOLDER|${PANEL_URL}|g" /usr/local/bin/vps-monitor.sh
+sed -i "s|SECURITY_TOKEN_PLACEHOLDER|${TOKEN}|g" /usr/local/bin/vps-monitor.sh
 chmod +x /usr/local/bin/vps-monitor.sh
 
 # Cài đặt cron job chạy 5 phút một lần

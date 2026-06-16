@@ -24,10 +24,12 @@ import MailConfig from './pages/MailConfig';
 import AppInstaller from './pages/AppInstaller';
 import Webhooks from './pages/Webhooks';
 import Backups from './pages/Backups';
+import CentralMonitor from './pages/CentralMonitor';
 import './index.css';
 
 const pageMap = {
   dashboard: <Dashboard />,
+  centralmonitor: <CentralMonitor />,
   services: <Services />,
   webserver: <WebServer />,
   installer: <AppInstaller />,

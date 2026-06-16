@@ -7,6 +7,22 @@ header('Content-Type: application/json; charset=utf-8');
 // Thiết lập múi giờ Việt Nam
 date_default_timezone_set('Asia/Ho_Chi_Minh');
 
+require_once __DIR__ . '/config.php';
+
+$received_token = '';
+if (function_exists('getallheaders')) {
+    $headers = getallheaders();
+    foreach ($headers as $name => $value) {
+        if (strcasecmp($name, 'X-Secure-Token') === 0) {
+            $received_token = $value;
+            break;
+        }
+    }
+}
+if (!$received_token && isset($_SERVER['HTTP_X_SECURE_TOKEN'])) {
+    $received_token = $_SERVER['HTTP_X_SECURE_TOKEN'];
+}
+
 $data_dir = __DIR__ . '/data';
 if (!is_dir($data_dir)) {
     mkdir($data_dir, 0755, true);
@@ -16,6 +32,17 @@ $db_file = $data_dir . '/installations.json';
 // Lấy dữ liệu thô từ HTTP request body
 $input = file_get_contents('php://input');
 $payload = json_decode($input, true);
+
+if (!$received_token && isset($payload['token'])) {
+    $received_token = $payload['token'];
+}
+
+// Xác thực Token bảo mật nếu có cấu hình
+if (!empty($SECURITY_TOKEN) && $received_token !== $SECURITY_TOKEN) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'Yêu cầu bị từ chối: Token không hợp lệ']);
+    exit;
+}
 
 if (!$payload || empty($payload['ip'])) {
     echo json_encode(['success' => false, 'error' => 'Dữ liệu không hợp lệ']);

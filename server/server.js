@@ -73,6 +73,7 @@ const mailRoutes = require('./routes/mail');
 const installerRoutes = require('./routes/installer');
 const webhookRoutes = require('./routes/webhooks');
 const logsRoutes = require('./routes/logs');
+const centralMonitorRoutes = require('./routes/centralMonitor');
 const WebhookController = require('./controllers/WebhookController');
 
 // API Routes (Tuyến đường mở cho Auth)
@@ -120,6 +121,7 @@ app.use('/api/node', nodeRoutes);
 app.use('/api/mail', mailRoutes);
 app.use('/api/installer', installerRoutes);
 app.use('/api/logs', logsRoutes);
+app.use('/api/central-monitor', centralMonitorRoutes);
 
 // Socket.IO for real-time features
 // Middleware bảo mật xác thực toàn bộ kết nối Socket.IO
