@@ -208,6 +208,33 @@ async function chmod(req, res) {
 }
 
 /**
+ * Change owner
+ */
+async function chown(req, res) {
+    try {
+        const { vpsConfig, path: targetPath, owner, group } = req.body;
+        if (!owner) {
+            return res.status(400).json({ success: false, error: 'Thiếu thông tin chủ sở hữu (owner)' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const ownerGroup = group ? `${owner}:${group}` : owner;
+        await ssh.executeCommand(`chown -R ${escapeShellArg(ownerGroup)} ${escapeShellArg(targetPath)}`);
+
+        res.json({
+            success: true,
+            message: 'Đã thay đổi chủ sở hữu thành công'
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
+    }
+}
+
+/**
  * Upload file
  */
 async function uploadFile(req, res) {
@@ -387,6 +414,7 @@ module.exports = {
     renameFile,
     createFolder,
     chmod,
+    chown,
     uploadFile: [upload.single('file'), uploadFile],
     downloadFile,
     copyFile,

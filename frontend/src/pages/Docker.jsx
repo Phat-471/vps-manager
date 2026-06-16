@@ -45,6 +45,9 @@ export default function Docker() {
 
   // Logs modal state
   const [selectedContainerLogs, setSelectedContainerLogs] = useState(null);
+  const [selectedContainerId, setSelectedContainerId] = useState(null);
+  const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState(3000);
   const [logsText, setLogsText] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
 
@@ -279,6 +282,7 @@ services:
   };
 
   const viewLogs = async (id, name) => {
+    setSelectedContainerId(id);
     setSelectedContainerLogs(name);
     setLogsLoading(true);
     setLogsText('');
@@ -288,10 +292,32 @@ services:
     } catch (err) {
       console.error(err);
       setSelectedContainerLogs(null);
+      setSelectedContainerId(null);
     } finally {
       setLogsLoading(false);
     }
   };
+
+  const closeLogsModal = () => {
+    setSelectedContainerLogs(null);
+    setSelectedContainerId(null);
+    setAutoRefreshLogs(false);
+  };
+
+  useEffect(() => {
+    if (!selectedContainerId || !autoRefreshLogs) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiCall('/api/docker/logs', 'POST', { id: selectedContainerId });
+        setLogsText(res.data?.logs || 'Không có log.');
+      } catch (err) {
+        console.error('Lỗi khi tự động cập nhật logs:', err);
+      }
+    }, refreshInterval);
+
+    return () => clearInterval(interval);
+  }, [selectedContainerId, autoRefreshLogs, refreshInterval]);
 
   const pruneSystem = async () => {
     if (!window.confirm('Bạn có muốn dọn dẹp hệ thống Docker? Tất cả container đã dừng, mạng thừa, và cache build sẽ bị xóa!')) return;
@@ -1038,21 +1064,66 @@ services:
       {selectedContainerLogs && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ width: '800px', maxH: '85vh', display: 'flex', flexDirection: 'column' }}>
-            <div className="modal-header">
-              <h3 className="font-semibold text-lg flex items-center gap-2">
+            <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Terminal size={18} className="text-indigo-400" />
-                Logs: {selectedContainerLogs}
-              </h3>
-              <button onClick={() => setSelectedContainerLogs(null)} className="modal-close-btn">
+                <h3 className="font-semibold text-lg">
+                  Logs: {selectedContainerLogs}
+                </h3>
+              </div>
+              <div className="flex items-center gap-4 text-xs font-medium" style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '11px', color: '#9ca3af' }}>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setLogsLoading(true);
+                    try {
+                      const res = await apiCall('/api/docker/logs', 'POST', { id: selectedContainerId });
+                      setLogsText(res.data?.logs || 'Không có log.');
+                    } catch (err) {
+                      console.error(err);
+                    } finally {
+                      setLogsLoading(false);
+                    }
+                  }}
+                  disabled={logsLoading}
+                  className="btn btn-glass btn-xs"
+                  style={{ padding: '4px 8px', fontSize: '10px' }}
+                >
+                  Làm mới
+                </button>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoRefreshLogs}
+                    onChange={(e) => setAutoRefreshLogs(e.target.checked)}
+                    className="rounded"
+                    style={{ cursor: 'pointer' }}
+                  />
+                  Tự động làm mới
+                </label>
+                {autoRefreshLogs && (
+                  <select
+                    value={refreshInterval}
+                    onChange={(e) => setRefreshInterval(parseInt(e.target.value))}
+                    className="bg-black/30 border border-white/10 rounded px-1 py-0.5 text-xs text-gray-300"
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <option value={3000}>3 giây</option>
+                    <option value={5000}>5 giây</option>
+                    <option value={10000}>10 giây</option>
+                  </select>
+                )}
+              </div>
+              <button onClick={closeLogsModal} className="modal-close-btn" style={{ padding: '4px' }}>
                 <X size={18} />
               </button>
             </div>
-            <div className="modal-body flex-1 overflow-auto bg-black/60 font-mono text-xs text-green-400 p-4 rounded-lg min-h-[300px]" style={{ margin: '16px 20px' }}>
+            <div className="modal-body flex-1 overflow-auto bg-black/60 font-mono text-xs text-green-400 p-4 rounded-lg min-h-[350px]" style={{ margin: '16px 20px', userSelect: 'text' }}>
               {logsLoading ? 'Đang đọc log Docker...' : <pre className="whitespace-pre-wrap">{logsText}</pre>}
             </div>
             <div className="modal-footer">
               <button
-                onClick={() => setSelectedContainerLogs(null)}
+                onClick={closeLogsModal}
                 className="btn btn-glass"
               >
                 Đóng

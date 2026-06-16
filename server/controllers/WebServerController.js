@@ -276,6 +276,12 @@ async function installSSL(req, res) {
         }
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
+        // Kiểm tra xem certbot và plugin nginx đã cài chưa
+        const checkCertbot = await ssh.executeCommand('dpkg -l | grep -q python3-certbot-nginx && echo "OK" || echo "NO"');
+        if (checkCertbot.stdout.trim() !== 'OK') {
+            await ssh.executeCommand('apt-get update && apt-get install -y certbot python3-certbot-nginx');
+        }
+
         const safeEmail = escapeShellArg(email || 'admin@' + safeDomain);
         const result = await ssh.executeCommand(`certbot --nginx -d ${safeDomain} --non-interactive --agree-tos -m ${safeEmail}`);
 

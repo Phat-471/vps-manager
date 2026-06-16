@@ -21,7 +21,8 @@ import {
   Key, 
   HardDrive, 
   FolderHeart,
-  Archive
+  Archive,
+  User
 } from 'lucide-react';
 
 const getEditorLanguage = (fileName) => {
@@ -180,6 +181,28 @@ export default function FileManager() {
 
   const handleOpenFile = async (name) => {
     const fullPath = currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
+
+    // Check file size to avoid browser crash
+    const fileObj = files.find(f => f.name === name);
+    if (fileObj && fileObj.size) {
+      const sizeStr = fileObj.size.toUpperCase();
+      let isLarge = false;
+      if (sizeStr.includes('MB')) {
+        const num = parseFloat(sizeStr);
+        if (!isNaN(num) && num > 5) {
+          isLarge = true;
+        }
+      } else if (sizeStr.includes('GB')) {
+        isLarge = true;
+      }
+
+      if (isLarge) {
+        if (!window.confirm(`CẢNH BÁO: Tệp tin này có dung lượng lớn (${fileObj.size}). Việc mở tệp tin lớn trong trình duyệt có thể gây đơ hoặc treo trình duyệt. Bạn có chắc chắn muốn tiếp tục mở không?`)) {
+          return;
+        }
+      }
+    }
+
     setEditingFile({ name, path: fullPath });
     setLoading(true);
     try {
@@ -281,6 +304,26 @@ export default function FileManager() {
     try {
       await apiCall('/api/files/chmod', 'POST', { path: fullPath, permissions: newPerm });
       showToast(`Đã thay đổi quyền thành công`, 'success');
+      fetchFiles(currentPath);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleChown = async (e, fileObj) => {
+    if (e) e.stopPropagation();
+    const name = fileObj.name;
+    const fullPath = currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
+    const newOwner = window.prompt(`Đổi chủ sở hữu (Chown) cho "${name}" (Ví dụ: www-data, www-data:www-data, root):`, fileObj.owner || 'www-data');
+    if (!newOwner) return;
+
+    const parts = newOwner.split(':');
+    const owner = parts[0].trim();
+    const group = parts[1] ? parts[1].trim() : '';
+
+    try {
+      await apiCall('/api/files/chown', 'POST', { path: fullPath, owner, group });
+      showToast(`Đã thay đổi chủ sở hữu thành công`, 'success');
       fetchFiles(currentPath);
     } catch (err) {
       console.error(err);
@@ -831,6 +874,13 @@ export default function FileManager() {
                     className="btn btn-glass btn-sm flex items-center justify-center gap-1.5 text-yellow-400"
                   >
                     <Key size={12} /> Chmod
+                  </button>
+
+                  <button
+                    onClick={(e) => handleChown(e, selectedItem)}
+                    className="btn btn-glass btn-sm flex items-center justify-center gap-1.5 text-orange-400"
+                  >
+                    <User size={12} /> Chown
                   </button>
 
                   <button

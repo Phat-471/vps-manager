@@ -5,7 +5,7 @@ import { Database, User, Trash2, Plus, Download, Upload, ShieldAlert, Table, Ref
 const PRIVILEGE_OPTIONS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'INDEX', 'ALTER', 'CREATE TEMPORARY TABLES', 'LOCK TABLES', 'EXECUTE', 'CREATE VIEW', 'SHOW VIEW', 'CREATE ROUTINE', 'ALTER ROUTINE', 'EVENT', 'TRIGGER'];
 
 export default function MySQL() {
-  const { apiCall, showToast } = useVPS();
+  const { apiCall, showToast, currentVPS } = useVPS();
   const [databases, setDatabases] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -23,6 +23,7 @@ export default function MySQL() {
 
   // Import file path
   const [importPath, setImportPath] = useState('');
+  const [importingFile, setImportingFile] = useState(false);
 
   // ─── Phase 5: Privilege Manager State ───
   const [grantModal, setGrantModal] = useState(null); // { user, host }
@@ -120,7 +121,29 @@ export default function MySQL() {
     try {
       showToast(`Đang xuất backup database ${name}...`, 'info');
       const res = await apiCall('/api/mysql/export', 'POST', { name });
-      showToast(`Đã lưu tệp backup tại VPS: ${res.data.remotePath}`, 'success');
+      if (res.success && res.data?.remotePath) {
+        showToast(`Đã xuất xong! Bắt đầu tải file về máy tính...`, 'success');
+
+        // Kích hoạt download
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/api/files/download';
+        form.style.display = 'none';
+
+        const inputPath = document.createElement('input');
+        inputPath.name = 'path';
+        inputPath.value = res.data.remotePath;
+        form.appendChild(inputPath);
+
+        const inputVPS = document.createElement('input');
+        inputVPS.name = 'vpsConfig';
+        inputVPS.value = JSON.stringify(currentVPS);
+        form.appendChild(inputVPS);
+
+        document.body.appendChild(form);
+        form.submit();
+        document.body.removeChild(form);
+      }
     } catch (err) { console.error(err); }
   };
 
@@ -133,6 +156,52 @@ export default function MySQL() {
       setImportPath('');
       if (selectedDb === name) viewTables(name);
     } catch (err) { console.error(err); }
+  };
+
+  const handleUploadAndImport = async (e, dbName) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setImportingFile(true);
+    showToast(`Đang tải file ${file.name} lên VPS...`, 'info');
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('remotePath', '/tmp');
+    formData.append('vpsConfig', JSON.stringify(currentVPS));
+
+    try {
+      const response = await fetch('/api/files/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Tải file lên thất bại');
+      }
+
+      const remotePath = result.path; // path on VPS
+      showToast(`Đã tải lên! Đang import dữ liệu vào database ${dbName}...`, 'info');
+
+      // Import database
+      await apiCall('/api/mysql/import', 'POST', { name: dbName, remotePath });
+      showToast(`Đã nạp (import) dữ liệu thành công!`, 'success');
+
+      // Cleanup remote file
+      try {
+        await apiCall('/api/files/delete', 'POST', { path: remotePath });
+      } catch (cleanupErr) {
+        console.error('Không thể dọn dẹp file SQL tạm trên VPS:', cleanupErr);
+      }
+
+      if (selectedDb === dbName) viewTables(dbName);
+    } catch (err) {
+      showToast(`Lỗi import: ${err.message}`, 'error');
+    } finally {
+      setImportingFile(false);
+      // Reset input value to allow selecting same file again
+      e.target.value = '';
+    }
   };
 
   const handleRepairSystem = async () => {
@@ -273,13 +342,33 @@ export default function MySQL() {
                   </h3>
                   <button onClick={() => setSelectedDb(null)} className="text-xs text-gray-400 hover:underline" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>Đóng</button>
                 </div>
-                <div className="db-import-tool">
-                  <span className="text-xs font-semibold block text-gray-300">Nhập dữ liệu (Import SQL từ VPS)</span>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input type="text" placeholder="VD: /tmp/backup.sql" value={importPath} onChange={(e) => setImportPath(e.target.value)} className="input-glass" style={{ padding: '8px 12px' }} />
-                    <button onClick={() => importDB(selectedDb)} className="btn btn-glass text-indigo-300" style={{ padding: '8px 12px', fontSize: '12px' }}>
-                      <Upload size={13} /> Import
-                    </button>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }} className="db-import-tools">
+                  <div className="db-import-tool">
+                    <span className="text-xs font-semibold block text-gray-300">Nhập dữ liệu (Import SQL từ VPS)</span>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                      <input type="text" placeholder="VD: /tmp/backup.sql" value={importPath} onChange={(e) => setImportPath(e.target.value)} className="input-glass" style={{ padding: '8px 12px', fontSize: '12px' }} />
+                      <button onClick={() => importDB(selectedDb)} className="btn btn-glass text-indigo-300" style={{ padding: '8px 12px', fontSize: '12px' }}>
+                        <Upload size={13} /> Import
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="db-import-tool">
+                    <span className="text-xs font-semibold block text-gray-300">Nhập dữ liệu (Import SQL từ máy tính)</span>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', alignItems: 'center' }}>
+                      <label className="btn btn-glass text-green-400 cursor-pointer flex items-center gap-1.5" style={{ fontSize: '12px', padding: '8px 12px' }}>
+                        <Upload size={13} />
+                        {importingFile ? 'Đang nạp...' : 'Chọn file .sql & Import'}
+                        <input 
+                          type="file" 
+                          accept=".sql" 
+                          onChange={(e) => handleUploadAndImport(e, selectedDb)} 
+                          className="hidden" 
+                          disabled={importingFile} 
+                        />
+                      </label>
+                      <span className="text-[10px] text-gray-400 leading-tight">File sẽ được tải lên VPS tạm thời và giải phóng tự động.</span>
+                    </div>
                   </div>
                 </div>
                 {tablesLoading ? (

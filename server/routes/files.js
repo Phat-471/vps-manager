@@ -9,6 +9,7 @@ router.post('/write', FileController.writeFile);
 router.post('/delete', FileController.deleteFile);
 router.post('/rename', FileController.renameFile);
 router.post('/chmod', FileController.chmod);
+router.post('/chown', FileController.chown);
 router.post('/copy', FileController.copyFile);
 router.post('/zip', FileController.zipFile);
 router.post('/unzip', FileController.unzipFile);
