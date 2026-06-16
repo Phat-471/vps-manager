@@ -186,7 +186,7 @@ echo -e "${YELLOW}7. Thiết lập cấu hình mạng & mật khẩu bảo vệ 
 echo -e "Đang quét cổng (port) trống trên hệ thống..."
 while true; do
     RANDOM_PORT=$((10000 + RANDOM % 55000))
-    if ! ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT " && ! netstat -tuln 2>/dev/null | grep -q ":$RANDOM_PORT " && ! lsof -i :$RANDOM_PORT &>/dev/null; then
+    if ! ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT " && ! netstat -tuln 2>/dev/null | grep -q ":$RANDOM_PORT " && ! lsof -n -P -i :$RANDOM_PORT &>/dev/null; then
         break
     fi
 done
