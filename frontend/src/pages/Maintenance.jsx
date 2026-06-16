@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useVPS } from '../context/VPSContext';
-import { ShieldCheck, RefreshCw, Cpu, Check, Download } from 'lucide-react';
+import { ShieldCheck, RefreshCw, Cpu, Check, Download, ShieldAlert, Globe, Mail, Lock } from 'lucide-react';
 
 export default function Maintenance() {
-  const { apiCall, showToast } = useVPS();
+  const { apiCall, showToast, currentVPS } = useVPS();
   const [osDetails, setOsDetails] = useState({ osType: 'unknown', packageManager: 'apt' });
   const [installedSoftware, setInstalledSoftware] = useState({});
   const [loading, setLoading] = useState(false);
@@ -11,6 +11,11 @@ export default function Maintenance() {
 
   // Custom package input
   const [customPackage, setCustomPackage] = useState('');
+
+  // Panel Domain & SSL Configuration
+  const [panelDomain, setPanelDomain] = useState('');
+  const [panelEmail, setPanelEmail] = useState('');
+  const [configuringSSL, setConfiguringSSL] = useState(false);
 
   const softwareList = [
     { key: 'lemp', name: 'LEMP Stack (Nginx, MySQL, PHP)', desc: 'Bộ khung chạy web PHP hoàn chỉnh', installEndpoint: '/api/software/install-lemp' },
@@ -118,6 +123,38 @@ export default function Maintenance() {
     }
   };
 
+  const handleConfigurePanelSSL = async (e) => {
+    e.preventDefault();
+    if (!panelDomain.trim()) {
+      showToast('Vui lòng nhập tên miền', 'warning');
+      return;
+    }
+    if (currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') {
+      showToast('Không thể cài đặt SSL Let\'s Encrypt ở chế độ Native Mode (Localhost).', 'warning');
+      return;
+    }
+
+    if (!window.confirm(`Bạn có chắc chắn muốn cấu hình tên miền ${panelDomain} và cài đặt SSL Let's Encrypt cho Panel không? Hãy đảm bảo tên miền đã được trỏ DNS về IP của VPS.`)) return;
+
+    setConfiguringSSL(true);
+    showToast(`Đang cấu hình tên miền ${panelDomain} và cài đặt Let's Encrypt SSL...`, 'info');
+    try {
+      const res = await apiCall('/api/system/setup-panel-ssl', 'POST', {
+        domain: panelDomain.trim(),
+        email: panelEmail.trim()
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        setPanelDomain('');
+        setPanelEmail('');
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setConfiguringSSL(false);
+    }
+  };
+
   const getCleanVersion = (rawVersion) => {
     if (!rawVersion) return '';
     const match = rawVersion.match(/(\d+\.\d+(\.\d+)?)/);
@@ -185,35 +222,126 @@ export default function Maintenance() {
           </div>
         </div>
 
-        {/* Custom Package Installer */}
-        <div className="db-layout-main card-glass p-6 rounded-xl space-y-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Download size={18} className="text-green-400" />
-            Cài đặt gói tự do (Apt / Yum)
-          </h2>
-          <p className="text-sm text-gray-400">
-            Nếu cần cài các gói lệnh Linux cụ thể, bạn có thể gõ nhanh tên gói vào đây thay vì mở Terminal.
-          </p>
-          <form onSubmit={handleInstallCustomPackage} style={{ display: 'flex', gap: '8px', paddingTop: '8px' }}>
-            <input
-              type="text"
-              required
-              disabled={installingKey !== null}
-              placeholder="VD: curl, unzip, zip, htop, fail2ban"
-              value={customPackage}
-              onChange={(e) => setCustomPackage(e.target.value)}
-              className="input-glass"
-              style={{ padding: '10px 14px' }}
-            />
-            <button
-              type="submit"
-              disabled={installingKey !== null}
-              className="btn btn-primary"
-              style={{ padding: '10px 20px' }}
-            >
-              Cài đặt
-            </button>
-          </form>
+        {/* Custom Package Installer & SSL Panel Configuration */}
+        <div className="db-layout-main">
+          {/* Card 1: Custom Package Installer */}
+          <div className="card-glass p-6 rounded-xl space-y-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Download size={18} className="text-green-400" />
+              Cài đặt gói tự do (Apt / Yum)
+            </h2>
+            <p className="text-sm text-gray-400">
+              Nếu cần cài các gói lệnh Linux cụ thể, bạn có thể gõ nhanh tên gói vào đây thay vì mở Terminal.
+            </p>
+            <form onSubmit={handleInstallCustomPackage} style={{ display: 'flex', gap: '8px', paddingTop: '8px' }}>
+              <input
+                type="text"
+                required
+                disabled={installingKey !== null}
+                placeholder="VD: curl, unzip, zip, htop, fail2ban"
+                value={customPackage}
+                onChange={(e) => setCustomPackage(e.target.value)}
+                className="input-glass"
+                style={{ padding: '10px 14px' }}
+              />
+              <button
+                type="submit"
+                disabled={installingKey !== null}
+                className="btn btn-primary"
+                style={{ padding: '10px 20px' }}
+              >
+                Cài đặt
+              </button>
+            </form>
+          </div>
+
+          {/* Card 2: Panel Domain & SSL Configuration */}
+          <div className="card-glass p-6 rounded-xl space-y-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Globe size={18} className="text-indigo-400" />
+              Thiết lập Tên miền & SSL truy cập Panel
+            </h2>
+            <p className="text-sm text-gray-400">
+              Cấu hình tên miền riêng và chứng chỉ SSL Let's Encrypt giúp bạn truy cập VPS Manager Panel an toàn qua HTTPS thay vì liên kết HTTP mặc định.
+            </p>
+
+            {(currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') ? (
+              <div className="p-4 rounded-xl border border-yellow-500/20 bg-yellow-500/5 text-xs text-yellow-300 leading-relaxed flex items-center gap-2.5">
+                <ShieldAlert className="text-yellow-400 shrink-0" size={20} />
+                <div>
+                  <strong>Cảnh báo Native Mode (Localhost)</strong>
+                  <p className="text-gray-400 text-[10px] mt-0.5">
+                    Cài đặt SSL Let's Encrypt yêu cầu VPS có IP Public công khai và một tên miền được trỏ DNS A về IP đó. Chế độ Native Mode (Localhost) không hỗ trợ tính năng này.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 text-xs text-indigo-300 leading-relaxed flex items-center gap-2.5">
+                <Globe className="text-indigo-400 shrink-0" size={20} />
+                <div>
+                  <strong>Yêu cầu DNS cấu hình trước:</strong>
+                  <p className="text-gray-400 text-[10px] mt-0.5">
+                    Bạn phải cấu hình bản ghi A cho tên miền của bạn (ví dụ: <code>panel.cua-ban.com</code>) trỏ về IP của VPS này (<code>{currentVPS?.host}</code>) trước khi thực hiện cài đặt.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleConfigurePanelSSL} className="space-y-4 pt-2">
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label className="text-xs text-gray-400 flex items-center gap-1.5">
+                  <Globe size={14} className="text-gray-500" />
+                  Tên miền truy cập (Domain)
+                </label>
+                <input
+                  type="text"
+                  required
+                  disabled={configuringSSL || currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1'}
+                  placeholder="VD: panel.domain.com"
+                  value={panelDomain}
+                  onChange={(e) => setPanelDomain(e.target.value)}
+                  className="input-glass"
+                  style={{ padding: '10px 14px', width: '100%' }}
+                />
+              </div>
+
+              <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label className="text-xs text-gray-400 flex items-center gap-1.5">
+                  <Mail size={14} className="text-gray-500" />
+                  Email đăng ký SSL (Let's Encrypt)
+                </label>
+                <input
+                  type="email"
+                  required
+                  disabled={configuringSSL || currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1'}
+                  placeholder="VD: admin@domain.com"
+                  value={panelEmail}
+                  onChange={(e) => setPanelEmail(e.target.value)}
+                  className="input-glass"
+                  style={{ padding: '10px 14px', width: '100%' }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={configuringSSL || currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1'}
+                className="btn btn-primary flex items-center justify-center gap-2"
+                style={{ padding: '10px 20px', width: '100%', marginTop: '8px' }}
+              >
+                {configuringSSL ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin" />
+                    Đang thiết lập Tên miền & SSL...
+                  </>
+                ) : (
+                  <>
+                    <Lock size={16} />
+                    Cấu hình Tên miền & SSL
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 const { connectionPool } = require('../utils/ssh');
-const { sanitizeNumber } = require('../utils/security');
+const { sanitizeNumber, sanitizeAlphaNum, escapeShellArg } = require('../utils/security');
+const { logActivity } = require('../utils/logger');
 
 /**
  * Lấy thông tin hệ thống
@@ -656,6 +657,84 @@ async function quickRestartService(req, res) {
     }
 }
 
+/**
+ * Configure Panel Domain & Let's Encrypt SSL (HTTPS Reverse Proxy)
+ */
+async function configurePanelSSL(req, res) {
+    try {
+        const { vpsConfig, domain, email } = req.body;
+        const safeDomain = sanitizeAlphaNum(domain);
+        if (!safeDomain) {
+            return res.status(400).json({ success: false, error: 'Tên miền không hợp lệ' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        // Lấy port hiện tại của panel đang chạy
+        const panelPort = process.env.PORT || 3000;
+
+        // Tạo cấu hình Nginx proxy-pass cho panel
+        const nginxConfig = `
+server {
+    listen 80;
+    server_name ${safeDomain};
+
+    location / {
+        proxy_pass http://127.0.0.1:${panelPort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+`;
+
+        const configPath = `/etc/nginx/sites-available/vps-manager-panel`;
+
+        // Ghi file cấu hình Nginx
+        await ssh.executeCommand(`cat > ${configPath} << 'EOF'
+${nginxConfig}
+EOF`);
+
+        // Kích hoạt config (tạo symlink)
+        await ssh.executeCommand(`ln -sf ${configPath} /etc/nginx/sites-enabled/`);
+
+        // Test và reload nginx
+        const testNginx = await ssh.executeCommand('nginx -t');
+        if (testNginx.code !== 0) {
+            throw new Error(`Cấu hình Nginx lỗi: ${testNginx.stderr}`);
+        }
+        await ssh.executeCommand('systemctl reload nginx');
+
+        // Cài đặt Certbot SSL Let's Encrypt
+        const checkCertbot = await ssh.executeCommand('dpkg -l | grep -q python3-certbot-nginx && echo "OK" || echo "NO"');
+        if (checkCertbot.stdout.trim() !== 'OK') {
+            await ssh.executeCommand('apt-get update && apt-get install -y certbot python3-certbot-nginx');
+        }
+
+        const safeEmail = escapeShellArg(email || `admin@${safeDomain}`);
+        const certbotResult = await ssh.executeCommand(`certbot --nginx -d ${safeDomain} --non-interactive --agree-tos -m ${safeEmail}`);
+
+        if (certbotResult.code !== 0) {
+            throw new Error(`Certbot lỗi: ${certbotResult.stderr || certbotResult.stdout}`);
+        }
+
+        logActivity('Cài đặt SSL Panel', `Cài đặt tên miền truy cập ${domain} và SSL Let's Encrypt thành công cho Panel`, vpsConfig.id);
+
+        res.json({
+            success: true,
+            message: `Cấu hình tên miền và SSL thành công! Bạn có thể truy cập Panel qua https://${safeDomain}`
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getSystemInfo,
     getCPUInfo,
@@ -674,5 +753,6 @@ module.exports = {
     getSetupChecklist,
     getServiceHealth,
     quickRestartService,
-    updatePanel
+    updatePanel,
+    configurePanelSSL
 };
