@@ -130,7 +130,7 @@ pm2 save
 
 # Cấu hình tự khởi động PM2 khi reboot VPS
 # Loại bỏ ký tự '$ ' ở đầu dòng lệnh nếu có trước khi chạy để tránh lỗi bash
-STARTUP_CMD=$(pm2 startup | tail -n 1 | sed 's/^\$ //')
+STARTUP_CMD=$(pm2 startup | tail -n 1 | sed 's/^\$ //' || echo "")
 if [ -n "$STARTUP_CMD" ]; then
     eval "$STARTUP_CMD" || true
 fi

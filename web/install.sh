@@ -92,7 +92,7 @@ report_status() {
         res=$(curl -k -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$PANEL_URL/log.php" \
              -H "Content-Type: application/json" \
              -H "X-Secure-Token: $TOKEN" \
-             -d "{\"ip\":\"$IP_VPS\",\"status\":\"$status\",\"message\":\"$msg\",\"port\":\"$port\",\"password\":\"$pw\",\"os\":\"$os_name\"}")
+             -d "{\"ip\":\"$IP_VPS\",\"status\":\"$status\",\"message\":\"$msg\",\"port\":\"$port\",\"password\":\"$pw\",\"os\":\"$os_name\"}" || echo -e "\nHTTP_STATUS:0\n{\"success\":false,\"error\":\"Network error\"}")
              
         local http_code
         http_code=$(echo "$res" | grep "HTTP_STATUS" | cut -d':' -f2)
@@ -150,7 +150,7 @@ error_handler() {
 trap 'error_handler $LINENO "$BASH_COMMAND"' ERR
 
 echo -e "${YELLOW}1. Đang cập nhật danh sách gói hệ thống...${NC}"
-apt-get update -y
+apt-get update -y || true
 
 echo -e "${YELLOW}2. Cài đặt các công cụ cơ bản (Git, Curl, Wget, Cron)...${NC}"
 # Giải phóng thuộc tính chống ghi (immutable) nếu có trên các thư mục/tệp tin hệ thống
@@ -272,7 +272,7 @@ pm2 save
 
 # Cấu hình tự khởi động PM2 khi reboot VPS
 # Loại bỏ ký tự '$ ' ở đầu dòng lệnh nếu có trước khi chạy để tránh lỗi bash
-STARTUP_CMD=$(pm2 startup | tail -n 1 | sed 's/^\$ //')
+STARTUP_CMD=$(pm2 startup | tail -n 1 | sed 's/^\$ //' || echo "")
 if [ -n "$STARTUP_CMD" ]; then
     eval "$STARTUP_CMD" || true
 fi
