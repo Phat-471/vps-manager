@@ -17,6 +17,10 @@ export default function Maintenance() {
   const [panelEmail, setPanelEmail] = useState('');
   const [configuringSSL, setConfiguringSSL] = useState(false);
 
+  // Panel Update Check
+  const [updateStatus, setUpdateStatus] = useState({ checked: false, hasUpdate: false, currentVersion: '', changelog: [] });
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
   const softwareList = [
     { key: 'lemp', name: 'LEMP Stack (Nginx, MySQL, PHP)', desc: 'Bộ khung chạy web PHP hoàn chỉnh', installEndpoint: '/api/software/install-lemp' },
     { key: 'nginx', name: 'Nginx Web Server', desc: 'Máy chủ Web và Reverse Proxy nhẹ, hiệu năng cao', installEndpoint: '/api/software/install-nginx' },
@@ -40,7 +44,29 @@ export default function Maintenance() {
 
   useEffect(() => {
     fetchSystemDetails();
+    checkUpdateStatus();
   }, []);
+
+  const checkUpdateStatus = async () => {
+    setCheckingUpdate(true);
+    try {
+      const res = await apiCall('/api/system/update-status', 'POST');
+      if (res.success) {
+        setUpdateStatus({
+          checked: true,
+          hasUpdate: res.hasUpdate,
+          currentVersion: res.currentVersion,
+          changelog: res.changelog || []
+        });
+      } else {
+        setUpdateStatus(prev => ({ ...prev, checked: true, error: res.error }));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
 
   const fetchSystemDetails = async () => {
     setLoading(true);
@@ -209,16 +235,64 @@ export default function Maintenance() {
             </button>
           </div>
           
-          <div className="pt-3 border-t border-white/5 mt-3">
+          <div className="pt-3 border-t border-white/5 mt-3 space-y-3">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-gray-400">VPS Manager Panel:</span>
+              <button 
+                onClick={checkUpdateStatus} 
+                disabled={checkingUpdate || installingKey !== null}
+                className="hover:text-indigo-400 text-gray-500 transition-colors flex items-center gap-1.5"
+                title="Kiểm tra cập nhật"
+                style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+              >
+                <RefreshCw size={12} className={checkingUpdate ? 'animate-spin' : ''} />
+                {checkingUpdate ? 'Đang check...' : 'Kiểm tra'}
+              </button>
+            </div>
+            
+            {updateStatus.checked && (
+              <div className="text-[11px] font-mono leading-relaxed bg-white/5 p-2.5 rounded-lg border border-white/5">
+                <div className="text-gray-300 truncate" title={updateStatus.currentVersion}>
+                  {updateStatus.currentVersion || 'Không rõ phiên bản'}
+                </div>
+                {updateStatus.hasUpdate ? (
+                  <span className="text-yellow-400 font-bold block mt-1">● Có bản cập nhật mới!</span>
+                ) : (
+                  <span className="text-green-400 block mt-1">✓ Đang chạy bản mới nhất</span>
+                )}
+              </div>
+            )}
+
             <button
               onClick={handleUpdatePanel}
-              disabled={installingKey !== null}
-              className="btn btn-glass btn-block text-green-300"
+              disabled={!updateStatus.hasUpdate || installingKey !== null || checkingUpdate}
+              className={`btn btn-block text-xs py-2.5 flex items-center justify-center gap-2 ${
+                updateStatus.hasUpdate 
+                  ? 'btn-primary text-white font-semibold' 
+                  : 'btn-secondary text-gray-500 cursor-not-allowed'
+              }`}
               style={{ padding: '10px' }}
             >
               <RefreshCw size={14} className={installingKey === 'panel-update' ? 'animate-spin' : ''} />
-              {installingKey === 'panel-update' ? 'Đang cập nhật...' : 'Cập nhật VPS Manager Panel'}
+              {installingKey === 'panel-update' 
+                ? 'Đang cập nhật...' 
+                : updateStatus.hasUpdate 
+                  ? 'Cập nhật Panel ngay' 
+                  : 'Đã là bản mới nhất'}
             </button>
+
+            {updateStatus.hasUpdate && updateStatus.changelog.length > 0 && (
+              <div className="pt-2 space-y-1.5">
+                <span className="text-[11px] font-semibold text-yellow-400 block">Nội dung cập nhật mới:</span>
+                <div className="max-h-28 overflow-y-auto text-[10px] font-mono text-gray-400 bg-black/20 p-2 rounded-lg border border-white/5 space-y-1 leading-normal pr-1">
+                  {updateStatus.changelog.map((commit, idx) => (
+                    <div key={idx} className="border-b border-white/5 pb-1 last:border-0 last:pb-0">
+                      {commit}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

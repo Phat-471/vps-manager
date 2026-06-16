@@ -735,6 +735,59 @@ EOF`);
     }
 }
 
+/**
+ * Check Panel Update Status and Changelog from Git
+ */
+async function checkPanelUpdateStatus(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        // Kiểm tra thư mục Git tồn tại
+        const checkGit = await ssh.executeCommand('cd /var/www/vps-manager && git rev-parse --is-inside-work-tree');
+        if (checkGit.code !== 0) {
+            return res.json({
+                success: false,
+                error: 'Mã nguồn không phải là git repository hoặc thư mục /var/www/vps-manager không tồn tại.'
+            });
+        }
+
+        // Chạy git fetch để cập nhật danh sách commit mới từ origin
+        await ssh.executeCommand('cd /var/www/vps-manager && git fetch');
+
+        // Lấy hash commit hiện tại và hash remote
+        const localCommitRes = await ssh.executeCommand('cd /var/www/vps-manager && git rev-parse HEAD');
+        const remoteCommitRes = await ssh.executeCommand('cd /var/www/vps-manager && git rev-parse @{u}');
+        
+        const localCommit = localCommitRes.stdout.trim();
+        const remoteCommit = remoteCommitRes.stdout.trim();
+
+        // Lấy thông tin phiên bản hiện tại
+        const currentVersionRes = await ssh.executeCommand('cd /var/www/vps-manager && git log -1 --pretty=format:"%h (%cr) - %s"');
+        const currentVersion = currentVersionRes.stdout.trim();
+
+        const hasUpdate = localCommit !== remoteCommit;
+        
+        let changelog = [];
+        if (hasUpdate) {
+            // Lấy danh sách các commit mới ở remote chưa được pull về
+            const changelogRes = await ssh.executeCommand('cd /var/www/vps-manager && git log HEAD..@{u} --pretty=format:"%h - %s (%cr)"');
+            changelog = changelogRes.stdout.trim().split('\n').filter(Boolean);
+        }
+
+        res.json({
+            success: true,
+            hasUpdate,
+            localCommit,
+            remoteCommit,
+            currentVersion,
+            changelog
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getSystemInfo,
     getCPUInfo,
@@ -754,5 +807,6 @@ module.exports = {
     getServiceHealth,
     quickRestartService,
     updatePanel,
-    configurePanelSSL
+    configurePanelSSL,
+    checkPanelUpdateStatus
 };

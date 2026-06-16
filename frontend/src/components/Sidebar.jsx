@@ -100,26 +100,28 @@ export default function Sidebar() {
               {currentVPS.name || currentVPS.host}
             </strong>
           </div>
-          <div className="vps-actions-buttons">
-            <button 
-              className="btn btn-secondary btn-sm" 
-              onClick={() => setActivePage('vps-modal')}
-              style={{ width: '100%', justifyContent: 'center' }}
-            >
-              Đổi VPS
-            </button>
-            <button 
-              className="btn btn-danger btn-sm" 
-              onClick={() => {
-                if (window.confirm('Bạn có chắc muốn ngắt kết nối VPS hiện tại?')) {
-                  disconnectVPS();
-                }
-              }}
-              style={{ width: '100%', justifyContent: 'center', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: 'none' }}
-            >
-              <LogOut size={12} /> Ngắt kết nối
-            </button>
-          </div>
+          {currentVPS.id !== 'vps_local' && (
+            <div className="vps-actions-buttons">
+              <button 
+                className="btn btn-secondary btn-sm" 
+                onClick={() => setActivePage('vps-modal')}
+                style={{ width: '100%', justifyContent: 'center' }}
+              >
+                Đổi VPS
+              </button>
+              <button 
+                className="btn btn-danger btn-sm" 
+                onClick={() => {
+                  if (window.confirm('Bạn có chắc muốn ngắt kết nối VPS hiện tại?')) {
+                    disconnectVPS();
+                  }
+                }}
+                style={{ width: '100%', justifyContent: 'center', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: 'none' }}
+              >
+                <LogOut size={12} /> Ngắt kết nối
+              </button>
+            </div>
+          )}
         </div>
       )}
 
