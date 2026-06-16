@@ -109,7 +109,11 @@ pm2 start server/server.js --name "vps-manager" --node-args="--max-old-space-siz
 pm2 save
 
 # Cấu hình tự khởi động PM2 khi reboot VPS
-pm2 startup | tail -n 1 | bash
+# Loại bỏ ký tự '$ ' ở đầu dòng lệnh nếu có trước khi chạy để tránh lỗi bash
+STARTUP_CMD=$(pm2 startup | tail -n 1 | sed 's/^\$ //')
+if [ -n "$STARTUP_CMD" ]; then
+    eval "$STARTUP_CMD" || true
+fi
 
 echo -e "${YELLOW}9. Mở cổng $PORT trên Tường lửa UFW...${NC}"
 if command -v ufw &> /dev/null; then

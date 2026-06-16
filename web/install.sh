@@ -115,11 +115,13 @@ report_status "installing" "Bắt đầu cài đặt VPS Manager Panel..." "" ""
 # Bẫy lỗi cài đặt để báo cáo thất bại
 error_handler() {
     local line=$1
-    report_status "failed" "Lỗi xảy ra tại dòng lệnh số $line" "" "" "$OS_VERSION"
-    echo -e "${RED}Cài đặt thất bại tại dòng số $line. Đã báo cáo về hệ thống trung tâm.${NC}"
+    local cmd=$2
+    local error_msg="Lỗi tại dòng $line: Lệnh '$cmd' thất bại."
+    report_status "failed" "$error_msg" "" "" "$OS_VERSION"
+    echo -e "${RED}$error_msg Đã báo cáo về hệ thống trung tâm.${NC}"
     exit 1
 }
-trap 'error_handler $LINENO' ERR
+trap 'error_handler $LINENO "$BASH_COMMAND"' ERR
 
 echo -e "${YELLOW}1. Đang cập nhật danh sách gói hệ thống...${NC}"
 apt-get update -y
@@ -243,7 +245,11 @@ pm2 start server/server.js --name "vps-manager" --node-args="--max-old-space-siz
 pm2 save
 
 # Cấu hình tự khởi động PM2 khi reboot VPS
-pm2 startup | tail -n 1 | bash
+# Loại bỏ ký tự '$ ' ở đầu dòng lệnh nếu có trước khi chạy để tránh lỗi bash
+STARTUP_CMD=$(pm2 startup | tail -n 1 | sed 's/^\$ //')
+if [ -n "$STARTUP_CMD" ]; then
+    eval "$STARTUP_CMD" || true
+fi
 
 echo -e "${YELLOW}9. Mở cổng $PORT trên Tường lửa UFW...${NC}"
 if command -v ufw &> /dev/null; then

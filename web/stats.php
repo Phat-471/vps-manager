@@ -1594,9 +1594,12 @@ foreach ($installations as $inst) {
                         <td style="font-family: monospace; font-weight: 600; color: #a5b4fc;">${escapeHtml(item.port || '--')}</td>
                         <td>${passwordHtml}</td>
                         <td>
-                            <span class="badge ${badgeClass}" ${item.status === 'failed' ? `title="${escapeHtml(item.message)}"` : ''} style="${item.status === 'failed' ? 'cursor:help;' : ''}">
-                                ${statusText}
-                            </span>
+                            <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+                                <span class="badge ${badgeClass}" ${item.status === 'failed' ? `title="${escapeHtml(item.message)}"` : ''} style="${item.status === 'failed' ? 'cursor:help;' : ''}">
+                                    ${statusText}
+                                </span>
+                                ${item.message ? `<span class="failed-msg" style="font-size: 10px; color: ${item.status === 'failed' ? '#f87171' : 'var(--text-secondary)'}; max-width: 180px; white-space: normal; line-height: 1.3; font-weight: 500; word-break: break-word;">${escapeHtml(item.message)}</span>` : ''}
+                            </div>
                         </td>
                         <td style="font-size: 12px; color: var(--text-secondary); font-family: monospace;">${escapeHtml(item.updatedAt)}</td>
                         <td>${sparklineHtml}</td>
