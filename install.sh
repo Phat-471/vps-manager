@@ -89,7 +89,18 @@ echo -e "${YELLOW}7. Thiết lập cấu hình mạng & mật khẩu bảo vệ 
 echo -e "Đang quét cổng (port) trống trên hệ thống..."
 while true; do
     RANDOM_PORT=$((10000 + RANDOM % 55000))
-    if ! ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT " && ! netstat -tuln 2>/dev/null | grep -q ":$RANDOM_PORT " && ! lsof -i :$RANDOM_PORT &>/dev/null; then
+    PORT_IN_USE=0
+    if command -v ss &>/dev/null; then
+        if ss -tuln 2>/dev/null | grep -q -E ":$RANDOM_PORT\b|:$RANDOM_PORT$" || ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT "; then
+            PORT_IN_USE=1
+        fi
+    else
+        HEX_PORT=$(printf '%04X' $RANDOM_PORT)
+        if grep -q -i ":$HEX_PORT " /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
+            PORT_IN_USE=1
+        fi
+    fi
+    if [ "$PORT_IN_USE" -eq 0 ]; then
         break
     fi
 done
