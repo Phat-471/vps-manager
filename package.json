@@ -3,9 +3,16 @@
   "version": "1.0.0",
   "description": "Công cụ quản lý VPS dễ dàng cho người mới bắt đầu",
   "main": "server/server.js",
+  "bin": "server/server.js",
   "scripts": {
     "start": "node server/server.js",
-    "dev": "nodemon server/server.js"
+    "dev": "nodemon server/server.js",
+    "build:bin": "pkg . --targets node18-linux-x64 --output dist/vps-manager"
+  },
+  "pkg": {
+    "assets": [
+      "public/**/*"
+    ]
   },
   "keywords": [
     "vps",
@@ -16,15 +23,16 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
-    "ssh2": "^1.15.0",
-    "socket.io": "^4.6.1",
-    "multer": "^1.4.5-lts.1",
-    "mime-types": "^2.1.35",
+    "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
-    "cors": "^2.8.5"
+    "express": "^4.18.2",
+    "mime-types": "^2.1.35",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.6.1",
+    "ssh2": "^1.15.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.1",
+    "pkg": "^5.8.1"
   }
 }

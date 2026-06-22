@@ -442,7 +442,7 @@ async function downloadBackup(req, res) {
             return res.status(400).json({ success: false, error: 'Thiếu tên file để tải' });
         }
 
-        const localDir = path.join(__dirname, '../../uploads');
+        const localDir = path.join(process.cwd(), 'uploads');
         if (!fs.existsSync(localDir)) {
             fs.mkdirSync(localDir, { recursive: true });
         }

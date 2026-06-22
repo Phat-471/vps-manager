@@ -8,6 +8,7 @@ frontend/node_modules/
 .env.*
 
 # Build output
+dist/
 # Note: Since public contains index.html and assets compiled from frontend, we do want to commit them so that VPS doesn't have to build frontend upon install/update.
 # Since install.sh compiles it during deployment, it's better to keep public/ in git but exclude dynamic builds if we compile on target, or we can commit public/ directly so users can run the panel immediately without compiling!
 # Committing public/ is very convenient because the user doesn't need to install build tools on a low-end VPS if they don't want to! In fact, install.sh compiles it on target, but keeping compiled files in git is fine, or we can exclude them. Let's not ignore public/ so they can deploy quickly.
