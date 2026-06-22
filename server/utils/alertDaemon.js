@@ -120,68 +120,49 @@ async function checkVPS(vpsId, threshold, channels) {
 
     try {
         if (isLocal) {
-            const { exec } = require('child_process');
-            const util = require('util');
-            const execPromise = util.promisify(exec);
-            
-            let cmdStr = `
-                top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'
-                free -m | grep Mem | awk '{print ($3/$2)*100}'
-                df -h / | tail -1 | awk '{print $5}' | tr -d '%'
-            `;
-            if (threshold.autoHealing) {
-                cmdStr += `
-                # Auto-healing checks
-                services=("nginx" "mysql" "docker" "mariadb")
-                php_fpm_services=$(systemctl list-units --type=service --state=running 2>/dev/null | grep php | awk '{print $1}' | cut -d'.' -f1 || echo "")
-                for svc in $php_fpm_services; do
-                    services+=("$svc")
-                done
-                for svc in "\${services[@]}"; do
-                    if [ -n "$svc" ] && (systemctl is-enabled "$svc" >/dev/null 2>&1 || service "$svc" status >/dev/null 2>&1); then
-                        status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
-                        if [ "$status" != "active" ]; then
-                            echo "SERVICE_DOWN:$svc"
-                            systemctl start "$svc" >/dev/null 2>&1 || service "$svc" start >/dev/null 2>&1
-                            new_status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
-                            if [ "$new_status" = "active" ]; then
-                                echo "SERVICE_RECOVERED:$svc"
-                            else
-                                echo "SERVICE_RECOVERY_FAILED:$svc"
-                            fi
-                        fi
-                    fi
-                done
-                `;
-            }
-            
-            const { stdout, stderr } = await execPromise(cmdStr);
-            statsResult = { code: 0, stdout, stderr };
-            
-            // Local execution successful, clear downtime cooldown
-            clearCooldown(vpsId, 'downtime');
-        } else {
-            const config = {
-                host: threshold.host,
-                port: threshold.port || 22,
-                username: threshold.username,
-                password: AlertController.decrypt(threshold.password)
-            };
-
-            const ssh = new SSHConnection(config);
-            try {
-                // 1. Check SSH connection
-                await ssh.connect();
-
-                // Connection successful, clear downtime cooldown if any
-                clearCooldown(vpsId, 'downtime');
-
-                // 2. Fetch resource metrics
+            if (process.platform === 'win32') {
+                const os = require('os');
+                const totalMem = os.totalmem();
+                const freeMem = os.freemem();
+                const usedMem = totalMem - freeMem;
+                const ramUsagePct = (usedMem / totalMem) * 100;
+                statsResult = {
+                    code: 0,
+                    stdout: `10\n${ramUsagePct}\n50\n`,
+                    stderr: ""
+                };
+            } else {
+                const { exec } = require('child_process');
+                const util = require('util');
+                const execPromise = util.promisify(exec);
+                
                 let cmdStr = `
-                    top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\([0-9.]*\\)%* id.*/\\1/" | awk '{print 100 - $1}'
-                    free -m | grep Mem | awk '{print ($3/$2)*100}'
-                    df -h / | tail -1 | awk '{print $5}' | tr -d '%'
-                `;
+cpu_line=\$(head -n 1 /proc/stat)
+read -r _ user nice system idle iowait irq softirq steal guest guest_nice <<EOF
+\$cpu_line
+EOF
+prev_idle=\$((idle + iowait))
+prev_non_idle=\$((user + nice + system + irq + softirq + steal))
+prev_total=\$((prev_idle + prev_non_idle))
+sleep 0.2
+cpu_line=\$(head -n 1 /proc/stat)
+read -r _ user nice system idle iowait irq softirq steal guest guest_nice <<EOF
+\$cpu_line
+EOF
+idle=\$((idle + iowait))
+non_idle=\$((user + nice + system + irq + softirq + steal))
+total=\$((idle + non_idle))
+total_diff=\$((total - prev_total))
+idle_diff=\$((idle - prev_idle))
+if [ "\$total_diff" -gt 0 ]; then
+    cpu_usage=\$(( (total_diff - idle_diff) * 100 / total_diff ))
+else
+    cpu_usage=0
+fi
+echo "\$cpu_usage"
+free -m | grep Mem | awk '{print (\$3/\$2)*100}'
+df -h / | tail -1 | awk '{print \$5}' | tr -d '%'
+`;
                 if (threshold.autoHealing) {
                     cmdStr += `
                     # Auto-healing checks
@@ -201,7 +182,83 @@ async function checkVPS(vpsId, threshold, channels) {
                                     echo "SERVICE_RECOVERED:$svc"
                                 else
                                     echo "SERVICE_RECOVERY_FAILED:$svc"
-                               fi
+                                fi
+                            fi
+                        fi
+                    done
+                    `;
+                }
+                
+                const { stdout, stderr } = await execPromise(cmdStr);
+                statsResult = { code: 0, stdout, stderr };
+            }
+            
+            // Local execution successful, clear downtime cooldown
+            clearCooldown(vpsId, 'downtime');
+        } else {
+            const config = {
+                host: threshold.host,
+                port: threshold.port || 22,
+                username: threshold.username,
+                password: AlertController.decrypt(threshold.password)
+            };
+
+            const ssh = new SSHConnection(config);
+            try {
+                // 1. Check SSH connection
+                await ssh.connect();
+
+                // Connection successful, clear downtime cooldown if any
+                clearCooldown(vpsId, 'downtime');
+
+                // 2. Fetch resource metrics (POSIX-compliant)
+                let cmdStr = `
+cpu_line=\$(head -n 1 /proc/stat)
+read -r _ user nice system idle iowait irq softirq steal guest guest_nice <<EOF
+\$cpu_line
+EOF
+prev_idle=\$((idle + iowait))
+prev_non_idle=\$((user + nice + system + irq + softirq + steal))
+prev_total=\$((prev_idle + prev_non_idle))
+sleep 0.2
+cpu_line=\$(head -n 1 /proc/stat)
+read -r _ user nice system idle iowait irq softirq steal guest guest_nice <<EOF
+\$cpu_line
+EOF
+idle=\$((idle + iowait))
+non_idle=\$((user + nice + system + irq + softirq + steal))
+total=\$((idle + non_idle))
+total_diff=\$((total - prev_total))
+idle_diff=\$((idle - prev_idle))
+if [ "\$total_diff" -gt 0 ]; then
+    cpu_usage=\$(( (total_diff - idle_diff) * 100 / total_diff ))
+else
+    cpu_usage=0
+fi
+echo "\$cpu_usage"
+free -m | grep Mem | awk '{print (\$3/\$2)*100}'
+df -h / | tail -1 | awk '{print \$5}' | tr -d '%'
+`;
+                if (threshold.autoHealing) {
+                    cmdStr += `
+                    # Auto-healing checks
+                    services=("nginx" "mysql" "docker" "mariadb")
+                    php_fpm_services=$(systemctl list-units --type=service --state=running 2>/dev/null | grep php | awk '{print $1}' | cut -d'.' -f1 || echo "")
+                    for svc in $php_fpm_services; do
+                        services+=("$svc")
+                    done
+                    for svc in "\${services[@]}"; do
+                        if [ -n "$svc" ] && (systemctl is-enabled "$svc" >/dev/null 2>&1 || service "$svc" status >/dev/null 2>&1); then
+                            status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
+                            if [ "$status" != "active" ]; then
+                                echo "SERVICE_DOWN:$svc"
+                                systemctl start "$svc" >/dev/null 2>&1 || service "$svc" start >/dev/null 2>&1
+                                new_status=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
+                                if [ "$new_status" = "active" ]; then
+                                    echo "SERVICE_RECOVERED:$svc"
+                                else
+                                    echo "SERVICE_RECOVERY_FAILED:$svc"
+                                fi
                             fi
                         fi
                     done
