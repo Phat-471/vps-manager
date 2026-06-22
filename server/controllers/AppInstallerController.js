@@ -49,6 +49,7 @@ async function installWordPress(req, res) {
                 if ! command -v certbot &> /dev/null; then
                     echo ">> Cài đặt Certbot..."
                     if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
                         apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y certbot python3-certbot-nginx
                     else
                         yum install -y epel-release && yum install -y certbot python3-certbot-nginx
@@ -231,6 +232,7 @@ async function installLaravel(req, res) {
                 if ! command -v certbot &> /dev/null; then
                     echo ">> Cài đặt Certbot..."
                     if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
                         apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y certbot python3-certbot-nginx
                     else
                         yum install -y epel-release && yum install -y certbot python3-certbot-nginx
@@ -396,6 +398,7 @@ async function prepareInstallation(req, res) {
                     if ! command -v certbot &> /dev/null; then
                         echo ">> Cài đặt Certbot..."
                         if [ -f /etc/debian_version ]; then
+                            while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
                             apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y certbot python3-certbot-nginx
                         else
                             yum install -y epel-release && yum install -y certbot python3-certbot-nginx
@@ -676,12 +679,18 @@ EOF
                 # Kiểm tra Nginx & php-fpm
                 if ! command -v nginx &> /dev/null; then
                     echo ">> Nginx chưa được cài đặt. Đang cài đặt..."
-                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                        apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+                    fi
                 fi
 
                 if ! command -v unzip &> /dev/null; then
                     echo ">> Unzip/wget chưa cài đặt. Đang cài đặt..."
-                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y unzip wget
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                        apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y unzip wget
+                    fi
                 fi
 
                 echo ">> Tải bản phpMyAdmin mới nhất..."
@@ -760,6 +769,7 @@ EOF
                 if ! command -v docker &> /dev/null; then
                     echo ">> Docker chưa được cài đặt. Đang cài đặt Docker..."
                     if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
                         apt-get update
                         apt-get install -y docker.io
                     else

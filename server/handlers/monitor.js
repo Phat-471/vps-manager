@@ -26,9 +26,29 @@ function start(socket, vpsConfig) {
 
     socketToVpsMap.set(socketId, vpsId);
 
-    // Command to fetch stats in one go
+    // Command to fetch stats in one go without heavy top process
     const cmd = `
-cpu_usage=\$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\\\\([0-9.]*\\\\)%* id.*/\\\\1/" | awk '{print 100 - \$1}')
+read -r _ user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+prev_idle=\$((idle + iowait))
+prev_non_idle=\$((user + nice + system + irq + softirq + steal))
+prev_total=\$((prev_idle + prev_non_idle))
+
+sleep 0.2
+
+read -r _ user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+idle=\$((idle + iowait))
+non_idle=\$((user + nice + system + irq + softirq + steal))
+total=\$((idle + non_idle))
+
+total_diff=\$((total - prev_total))
+idle_diff=\$((idle - prev_idle))
+
+if [ "\$total_diff" -gt 0 ]; then
+    cpu_usage=\$(( (total_diff - idle_diff) * 100 / total_diff ))
+else
+    cpu_usage=0
+fi
+
 cpu_cores=\$(nproc)
 cpu_model=\$(lscpu | grep "Model name" | cut -d':' -f2 | xargs 2>/dev/null || cat /proc/cpuinfo | grep "model name" | head -1 | cut -d':' -f2 | xargs 2>/dev/null || echo "Generic CPU")
 read -r mem_total mem_used < <(free -b | grep Mem | awk '{print \$2,\$3}')
@@ -74,7 +94,15 @@ echo "UPTIME:\$uptime_sec"
         state.fetching = true;
 
         try {
-            const isLocal = vpsConfig.host === 'localhost' || vpsConfig.host === '127.0.0.1' || vpsConfig.host === '0.0.0.0';
+            const os = require('os');
+            const interfaces = os.networkInterfaces();
+            const localIPs = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
+            for (const name of Object.keys(interfaces)) {
+                for (const net of interfaces[name]) {
+                    localIPs.add(net.address);
+                }
+            }
+            const isLocal = localIPs.has(vpsConfig.host);
             let output = '';
 
             if (isLocal) {

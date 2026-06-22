@@ -9,7 +9,10 @@ class SSHConnection {
             host: config.host,
             port: config.port || 22,
             username: config.username,
-            password: config.password
+            password: config.password,
+            keepaliveInterval: 10000, // Gửi ping duy trì mỗi 10 giây
+            keepaliveCountMax: 3,     // Tối đa 3 lần ping không phản hồi sẽ ngắt
+            readyTimeout: 20000       // Giới hạn thời gian kết nối 20 giây
         };
         this.isLocal = this.config.host === 'localhost' || this.config.host === '127.0.0.1' || this.config.host === '0.0.0.0';
         this.client = null;

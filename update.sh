@@ -20,17 +20,32 @@ fi
 # Đi tới thư mục chứa Panel
 cd /var/www/vps-manager || exit
 
-echo -e "${YELLOW}1. Đang kéo mã nguồn mới nhất từ Git...${NC}"
-# Sử dụng git pull để lấy những cập nhật mới nhất (bao gồm cả thư mục public/ đã được build sẵn ở local)
-git pull
+echo -e "${YELLOW}1. Đang chuẩn bị mã nguồn & dọn dẹp thay đổi tạm thời...${NC}"
+# Lưu các thay đổi cục bộ tạm thời (nếu có) để tránh xung đột khi kéo code mới
+HAS_STASH=0
+if git status --porcelain | grep -q '^[MADRCU?]'; then
+    echo -e "${YELLOW}>> Phát hiện thay đổi cục bộ, đang tạm lưu trữ bằng git stash...${NC}"
+    git stash -u >/dev/null 2>&1
+    HAS_STASH=1
+fi
 
-echo -e "${YELLOW}2. Cập nhật các thư viện thiết yếu (Production Only)...${NC}"
+echo -e "${YELLOW}2. Đang kéo mã nguồn mới nhất từ Git...${NC}"
+git fetch --all
+git pull origin main --rebase || git pull origin main
+
+if [ "$HAS_STASH" -eq 1 ]; then
+    echo -e "${YELLOW}>> Đang khôi phục lại các thay đổi cục bộ...${NC}"
+    git stash pop >/dev/null 2>&1 || echo -e "${RED}Cảnh báo: Không thể tự động merge các thay đổi cục bộ cũ. Bạn nên kiểm tra lại bằng lệnh 'git stash pop' thủ công.${NC}"
+fi
+
+echo -e "${YELLOW}3. Cập nhật các thư viện thiết yếu (Production Only)...${NC}"
 # Sử dụng --omit=dev để chỉ tải các thư viện chạy, bỏ qua thư viện phát triển nặng nề
 npm install --omit=dev
 
-echo -e "${YELLOW}3. Khởi động lại ứng dụng qua PM2 để áp dụng thay đổi...${NC}"
+echo -e "${YELLOW}4. Khởi động lại ứng dụng qua PM2 để áp dụng thay đổi...${NC}"
 if command -v pm2 &> /dev/null; then
-    pm2 restart vps-manager
+    echo -e "${GREEN}Đang thực hiện reload ứng dụng bằng PM2 (Zero Downtime)...${NC}"
+    pm2 reload vps-manager || pm2 restart vps-manager
     echo -e "${GREEN}Đã khởi động lại tiến trình vps-manager thành công!${NC}"
 else
     echo -e "${RED}Cảnh báo: Không tìm thấy PM2. Khởi chạy tạm thời bằng Node thông thường...${NC}"
