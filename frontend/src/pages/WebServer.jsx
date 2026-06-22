@@ -342,6 +342,24 @@ export default function WebServer() {
     }
   };
 
+  const handleToggleSecurity = async (domainName, newAntiDdos, newBlockBots) => {
+    try {
+      showToast(`Đang cập nhật bảo mật cho ${domainName}...`, 'info');
+      const result = await apiCall('/api/webserver/update-security', 'POST', {
+        domain: domainName,
+        antiDdos: newAntiDdos,
+        blockBots: newBlockBots
+      });
+      if (result.success) {
+        showToast(result.message, 'success');
+        setSites(prev => prev.map(s => s.domain === domainName ? { ...s, antiDdos: newAntiDdos, blockBots: newBlockBots } : s));
+      }
+    } catch (err) {
+      showToast('Lỗi khi cập nhật cấu hình bảo mật: ' + err.message, 'error');
+      loadSites();
+    }
+  };
+
   const handleEditConfig = async (domainName) => {
     try {
       const result = await apiCall('/api/webserver/config', 'POST', { domain: domainName });
@@ -592,6 +610,8 @@ export default function WebServer() {
                     <th>Tên miền</th>
                     <th>Thư mục root</th>
                     <th>Loại</th>
+                    <th>Anti-DDoS</th>
+                    <th>Chặn Bot</th>
                     <th>Kích hoạt</th>
                     <th style={{ textAlign: 'center', width: '250px' }}>Hành động</th>
                   </tr>
@@ -612,6 +632,26 @@ export default function WebServer() {
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/5 border border-white/5 text-gray-300" style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
                           {site.type ? site.type.toUpperCase() : 'PHP'}
                         </span>
+                      </td>
+                      <td>
+                        <label className="switch-container">
+                          <input 
+                            type="checkbox" 
+                            checked={site.antiDdos || false} 
+                            onChange={e => handleToggleSecurity(site.domain, e.target.checked, site.blockBots)}
+                          />
+                          <span className="switch-slider"></span>
+                        </label>
+                      </td>
+                      <td>
+                        <label className="switch-container">
+                          <input 
+                            type="checkbox" 
+                            checked={site.blockBots || false} 
+                            onChange={e => handleToggleSecurity(site.domain, site.antiDdos, e.target.checked)}
+                          />
+                          <span className="switch-slider"></span>
+                        </label>
                       </td>
                       <td>
                         <label className="switch-container">

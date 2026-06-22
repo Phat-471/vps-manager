@@ -16,6 +16,7 @@ router.post('/unzip', FileController.unzipFile);
 
 // Folder operations
 router.post('/mkdir', FileController.createFolder);
+router.post('/folder-size', FileController.getFolderSize);
 
 // Upload/Download
 router.post('/upload', ...FileController.uploadFile);

@@ -94,6 +94,7 @@ export default function FileManager() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [previewContent, setPreviewContent] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [scanningFolderSize, setScanningFolderSize] = useState(false);
 
   // System Shortcuts
   const SHORTCUTS = [
@@ -301,12 +302,37 @@ export default function FileManager() {
     const newPerm = window.prompt(`Đổi quyền (Chmod) cho "${name}" (Ví dụ: 755, 644):`, '755');
     if (!newPerm) return;
 
+    let recursive = false;
+    if (fileObj.type === 'directory') {
+      recursive = window.confirm(`Bạn có muốn áp dụng quyền này đệ quy (Chmod -R) cho tất cả thư mục và tệp tin con bên trong không?`);
+    }
+
     try {
-      await apiCall('/api/files/chmod', 'POST', { path: fullPath, permissions: newPerm });
+      await apiCall('/api/files/chmod', 'POST', { path: fullPath, permissions: newPerm, recursive });
       showToast(`Đã thay đổi quyền thành công`, 'success');
       fetchFiles(currentPath);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleGetFolderSize = async () => {
+    if (!selectedItem || selectedItem.type !== 'directory') return;
+    const folderPath = currentPath === '/' ? `/${selectedItem.name}` : `${currentPath}/${selectedItem.name}`;
+    setScanningFolderSize(true);
+    showToast(`Đang tính toán dung lượng thư mục ${selectedItem.name}...`, 'info');
+    try {
+      const res = await apiCall('/api/files/folder-size', 'POST', { path: folderPath });
+      if (res.success) {
+        const actualSize = res.data;
+        setSelectedItem(prev => prev ? { ...prev, size: actualSize } : null);
+        setFiles(prev => prev.map(f => f.name === selectedItem.name ? { ...f, size: actualSize } : f));
+        showToast(`Dung lượng thực tế: ${actualSize}`, 'success');
+      }
+    } catch (err) {
+      showToast('Không thể quét dung lượng: ' + err.message, 'error');
+    } finally {
+      setScanningFolderSize(false);
     }
   };
 
@@ -425,7 +451,7 @@ export default function FileManager() {
     const name = fileObj.name;
     const sourcePath = currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
     const defaultZipName = name.includes('.') ? name.substring(0, name.lastIndexOf('.')) + '.zip' : name + '.zip';
-    const zipName = window.prompt(`Nhập tên tệp nén zip:`, defaultZipName);
+    const zipName = window.prompt(`Nhập tên tệp nén (đuôi .zip hoặc .tar.gz):`, defaultZipName);
     if (!zipName) return;
 
     const zipPath = currentPath === '/' ? `/${zipName}` : `${currentPath}/${zipName}`;
@@ -822,7 +848,21 @@ export default function FileManager() {
 
                 {/* Properties list */}
                 <div className="space-y-2 text-xs bg-black/20 p-2.5 rounded-lg border border-white/5">
-                  <div className="flex justify-between"><span className="text-gray-500">Dung lượng:</span><span className="font-mono text-gray-300 font-medium">{selectedItem.size}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Dung lượng:</span>
+                    <span className="font-mono text-gray-300 font-medium flex items-center gap-1">
+                      {selectedItem.size}
+                      {selectedItem.type === 'directory' && (
+                        <button
+                          onClick={handleGetFolderSize}
+                          disabled={scanningFolderSize}
+                          className="text-indigo-400 hover:text-indigo-300 ml-1 font-sans text-[10px] underline"
+                        >
+                          {scanningFolderSize ? 'Đang quét...' : 'Quét'}
+                        </button>
+                      )}
+                    </span>
+                  </div>
                   <div className="flex justify-between"><span className="text-gray-500">Quyền hạn:</span><span className="font-mono text-gray-300 font-medium">{selectedItem.permissions}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Người sở hữu:</span><span className="font-mono text-gray-300 font-medium">{selectedItem.owner || 'root'}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Sửa đổi:</span><span className="font-mono text-gray-300 font-medium">{selectedItem.modified}</span></div>
@@ -901,10 +941,10 @@ export default function FileManager() {
                     onClick={(e) => handleZip(e, selectedItem)}
                     className="btn btn-glass btn-sm flex items-center justify-center gap-1.5 text-orange-400"
                   >
-                    <Archive size={12} /> Nén Zip
+                    <Archive size={12} /> Nén
                   </button>
 
-                  {selectedItem.type === 'file' && selectedItem.name.toLowerCase().endsWith('.zip') && (
+                  {selectedItem.type === 'file' && (selectedItem.name.toLowerCase().endsWith('.zip') || selectedItem.name.toLowerCase().endsWith('.tar.gz')) && (
                     <button
                       onClick={(e) => handleUnzip(e, selectedItem)}
                       className="btn btn-glass btn-sm flex items-center justify-center gap-1.5 text-cyan-400"

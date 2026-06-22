@@ -8,6 +8,7 @@ router.post('/delete', WebServerController.deleteSite);
 router.post('/config', WebServerController.getSiteConfig);
 router.post('/save-config', WebServerController.saveSiteConfig);
 router.post('/toggle', WebServerController.toggleSite);
+router.post('/update-security', WebServerController.updateSiteSecurity);
 router.post('/ssl', WebServerController.installSSL);
 router.post('/status', WebServerController.getNginxStatus);
 

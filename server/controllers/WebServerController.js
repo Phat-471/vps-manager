@@ -26,11 +26,16 @@ async function listSites(req, res) {
             const rootMatch = content.match(/root\s+([^;]+);/);
             const root = rootMatch ? rootMatch[1].trim() : 'N/A';
 
+            const antiDdos = content.includes('limit_req zone=ddos_limit');
+            const blockBots = content.includes('SemrushBot') || content.includes('AhrefsBot');
+
             sites.push({
                 domain: file,
                 root: root,
                 type: type,
-                enabled: true
+                enabled: true,
+                antiDdos,
+                blockBots
             });
         }
 
@@ -769,6 +774,130 @@ async function fixNginxIssue(req, res) {
     }
 }
 
+function updateConfigSecurityDirectives(configText, antiDdos, blockBots) {
+    // Clean old directives
+    let cleanText = configText.replace(/\s*limit_req\s+zone=ddos_limit[^\n;]*;/g, '');
+    cleanText = cleanText.replace(/\s*if\s*\(\$http_user_agent\s+~[*]?\s+\([^)]*(?:SemrushBot|AhrefsBot)[^)]*\)\)\s*\{[^}]*return\s+403;[^}]*\}/g, '');
+
+    if (!antiDdos && !blockBots) {
+        return cleanText;
+    }
+
+    // Construct new directives
+    let directives = '';
+    if (antiDdos) {
+        directives += '\n    limit_req zone=ddos_limit burst=20 nodelay;';
+    }
+    if (blockBots) {
+        directives += `
+    if ($http_user_agent ~* (SemrushBot|AhrefsBot|MJ12bot|DotBot|Baiduspider|python-requests|curl|wget)) {
+        return 403;
+    }`;
+    }
+
+    // We want to insert this inside server { ... } blocks that do not perform a redirect (no return 301/302).
+    const resultBlocks = [];
+    let currentIndex = 0;
+    
+    while (true) {
+        const serverStartIndex = cleanText.indexOf('server {', currentIndex);
+        if (serverStartIndex === -1) {
+            resultBlocks.push(cleanText.substring(currentIndex));
+            break;
+        }
+        
+        resultBlocks.push(cleanText.substring(currentIndex, serverStartIndex));
+        
+        // Find matching closing brace for this server block
+        let braceCount = 1;
+        let i = serverStartIndex + 8; // length of 'server {'
+        while (i < cleanText.length && braceCount > 0) {
+            if (cleanText[i] === '{') braceCount++;
+            else if (cleanText[i] === '}') braceCount--;
+            i++;
+        }
+        
+        let serverBlock = cleanText.substring(serverStartIndex, i);
+        
+        // Check if this server block is a redirect block
+        const isRedirect = /\breturn\s+30[1278]\b/.test(serverBlock);
+        if (!isRedirect) {
+            // Insert directives after server_name or root or listen
+            const serverNameMatch = serverBlock.match(/server_name\s+[^;]+;/);
+            if (serverNameMatch) {
+                const insertPos = serverBlock.indexOf(serverNameMatch[0]) + serverNameMatch[0].length;
+                serverBlock = serverBlock.substring(0, insertPos) + directives + serverBlock.substring(insertPos);
+            } else {
+                serverBlock = serverBlock.substring(0, 8) + directives + serverBlock.substring(8);
+            }
+        }
+        
+        resultBlocks.push(serverBlock);
+        currentIndex = i;
+    }
+    
+    return resultBlocks.join('');
+}
+
+async function updateSiteSecurity(req, res) {
+    try {
+        const { vpsConfig, domain, antiDdos, blockBots } = req.body;
+        const safeDomain = sanitizeAlphaNum(domain);
+        if (!safeDomain) {
+            return res.status(400).json({ success: false, error: 'Domain không hợp lệ' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const configPath = `/etc/nginx/sites-available/${safeDomain}`;
+        const exists = await ssh.exists(configPath);
+        if (!exists) {
+            return res.status(404).json({ success: false, error: 'Cấu hình website không tồn tại' });
+        }
+
+        let configContent = await ssh.readFile(configPath);
+
+        // 1. Handle Anti-DDoS global config
+        if (antiDdos) {
+            await ssh.executeCommand(`
+                if [ ! -f /etc/nginx/conf.d/ddos_limit.conf ]; then
+                    echo "limit_req_zone \\$binary_remote_addr zone=ddos_limit:10m rate=10r/s;" > /etc/nginx/conf.d/ddos_limit.conf
+                fi
+            `);
+        }
+
+        // 2. Modify configContent
+        const updatedConfig = updateConfigSecurityDirectives(configContent, antiDdos, blockBots);
+
+        // Write updated config
+        await ssh.writeFile(configPath, updatedConfig);
+
+        // Test config
+        const test = await ssh.executeCommand('nginx -t');
+        if (test.code !== 0) {
+            // Rollback
+            await ssh.writeFile(configPath, configContent);
+            return res.status(400).json({
+                success: false,
+                error: 'Nginx config test failed. Cấu hình đã được khôi phục.',
+                details: test.stderr || test.stdout
+            });
+        }
+
+        // Reload Nginx
+        await ssh.executeCommand('systemctl reload nginx');
+
+        logActivity('Cập nhật Bảo mật Website', `Đã cập nhật bảo mật cho website ${domain} (Anti-DDoS: ${antiDdos}, Block Bots: ${blockBots})`, vpsConfig.id);
+
+        res.json({
+            success: true,
+            message: 'Cập nhật cấu hình bảo mật thành công'
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listSites,
     addSite,
@@ -789,5 +918,6 @@ module.exports = {
     installWildcardSSL,
     uploadCustomSSL,
     scanNginxConfig,
-    fixNginxIssue
+    fixNginxIssue,
+    updateSiteSecurity
 };

@@ -189,10 +189,11 @@ async function createFolder(req, res) {
  */
 async function chmod(req, res) {
     try {
-        const { vpsConfig, path: targetPath, permissions } = req.body;
+        const { vpsConfig, path: targetPath, permissions, recursive = false } = req.body;
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
-        await ssh.executeCommand(`chmod ${escapeShellArg(permissions)} ${escapeShellArg(targetPath)}`);
+        const recurseFlag = recursive ? '-R' : '';
+        await ssh.executeCommand(`chmod ${recurseFlag} ${escapeShellArg(permissions)} ${escapeShellArg(targetPath)}`);
 
         res.json({
             success: true,
@@ -328,27 +329,33 @@ async function copyFile(req, res) {
     }
 }
 
-/**
- * Zip files/folders
- */
 async function zipFile(req, res) {
     try {
         const { vpsConfig, sourcePath, zipPath } = req.body;
         if (!sourcePath || !zipPath) {
-            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn nguồn hoặc đường dẫn tệp zip' });
+            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn nguồn hoặc đường dẫn tệp nén' });
         }
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
-        const cmd = `
-            if ! command -v zip >/dev/null 2>&1; then
-                if [ -f /etc/debian_version ]; then
-                    apt-get update && apt-get install -y zip
-                else
-                    yum install -y zip
+        
+        let cmd = '';
+        if (zipPath.toLowerCase().endsWith('.tar.gz')) {
+            const dirName = path.posix.dirname(sourcePath);
+            const baseName = path.posix.basename(sourcePath);
+            cmd = `tar -czf ${escapeShellArg(zipPath)} -C ${escapeShellArg(dirName)} ${escapeShellArg(baseName)}`;
+        } else {
+            cmd = `
+                if ! command -v zip >/dev/null 2>&1; then
+                    if [ -f /etc/debian_version ]; then
+                        apt-get update && apt-get install -y zip
+                    else
+                        yum install -y zip
+                    fi
                 fi
-            fi
-            zip -r ${escapeShellArg(zipPath)} ${escapeShellArg(sourcePath)}
-        `;
+                zip -r ${escapeShellArg(zipPath)} ${escapeShellArg(sourcePath)}
+            `;
+        }
+        
         const result = await ssh.executeCommand(cmd);
         if (result.code !== 0) {
             return res.status(500).json({ success: false, error: 'Nén tệp tin thất bại', details: result.stderr || result.stdout });
@@ -367,27 +374,31 @@ async function zipFile(req, res) {
     }
 }
 
-/**
- * Unzip file
- */
 async function unzipFile(req, res) {
     try {
         const { vpsConfig, zipPath, destPath } = req.body;
         if (!zipPath || !destPath) {
-            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn tệp zip hoặc thư mục đích' });
+            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn tệp nén hoặc thư mục đích' });
         }
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
-        const cmd = `
-            if ! command -v unzip >/dev/null 2>&1; then
-                if [ -f /etc/debian_version ]; then
-                    apt-get update && apt-get install -y unzip
-                else
-                    yum install -y unzip
+        
+        let cmd = '';
+        if (zipPath.toLowerCase().endsWith('.tar.gz')) {
+            cmd = `tar -xzf ${escapeShellArg(zipPath)} -C ${escapeShellArg(destPath)}`;
+        } else {
+            cmd = `
+                if ! command -v unzip >/dev/null 2>&1; then
+                    if [ -f /etc/debian_version ]; then
+                        apt-get update && apt-get install -y unzip
+                    else
+                        yum install -y unzip
+                    fi
                 fi
-            fi
-            unzip -o ${escapeShellArg(zipPath)} -d ${escapeShellArg(destPath)}
-        `;
+                unzip -o ${escapeShellArg(zipPath)} -d ${escapeShellArg(destPath)}
+            `;
+        }
+        
         const result = await ssh.executeCommand(cmd);
         if (result.code !== 0) {
             return res.status(500).json({ success: false, error: 'Giải nén tệp tin thất bại', details: result.stderr || result.stdout });
@@ -406,6 +417,24 @@ async function unzipFile(req, res) {
     }
 }
 
+/**
+ * Lấy kích thước folder
+ */
+async function getFolderSize(req, res) {
+    try {
+        const { vpsConfig, path: folderPath } = req.body;
+        if (!folderPath) {
+            return res.status(400).json({ success: false, error: 'Thiếu đường dẫn thư mục' });
+        }
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const result = await ssh.executeCommand(`du -sh ${escapeShellArg(folderPath)} 2>/dev/null || echo "N/A"`);
+        const size = result.stdout.trim().split(/\s+/)[0] || 'N/A';
+        res.json({ success: true, data: size });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listFiles,
     readFile,
@@ -419,6 +448,7 @@ module.exports = {
     downloadFile,
     copyFile,
     zipFile,
-    unzipFile
+    unzipFile,
+    getFolderSize
 };
 
