@@ -26,16 +26,22 @@ function start(socket, vpsConfig) {
 
     socketToVpsMap.set(socketId, vpsId);
 
-    // Command to fetch stats in one go without heavy top process
+    // Command to fetch stats in one go without heavy top process (POSIX-compliant)
     const cmd = `
-read -r _ user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+cpu_line=\$(head -n 1 /proc/stat)
+read -r _ user nice system idle iowait irq softirq steal guest guest_nice <<EOF
+\$cpu_line
+EOF
 prev_idle=\$((idle + iowait))
 prev_non_idle=\$((user + nice + system + irq + softirq + steal))
 prev_total=\$((prev_idle + prev_non_idle))
 
 sleep 0.2
 
-read -r _ user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+cpu_line=\$(head -n 1 /proc/stat)
+read -r _ user nice system idle iowait irq softirq steal guest guest_nice <<EOF
+\$cpu_line
+EOF
 idle=\$((idle + iowait))
 non_idle=\$((user + nice + system + irq + softirq + steal))
 total=\$((idle + non_idle))
@@ -51,9 +57,18 @@ fi
 
 cpu_cores=\$(nproc)
 cpu_model=\$(lscpu | grep "Model name" | cut -d':' -f2 | xargs 2>/dev/null || cat /proc/cpuinfo | grep "model name" | head -1 | cut -d':' -f2 | xargs 2>/dev/null || echo "Generic CPU")
-read -r mem_total mem_used < <(free -b | grep Mem | awk '{print \$2,\$3}')
-read -r disk_total disk_used < <(df -h / | tail -1 | awk '{print \$2,\$3}')
-disk_pct=\$(df -h / | tail -1 | awk '{print \$5}' | sed 's/%//')
+
+mem_vals=\$(free -b | grep Mem | awk '{print \$2,\$3}')
+read -r mem_total mem_used <<EOF
+\$mem_vals
+EOF
+
+disk_vals=\$(df -h / | tail -1 | awk '{print \$2,\$3,\$5}')
+read -r disk_total disk_used disk_pct_raw <<EOF
+\$disk_vals
+EOF
+disk_pct=\$(echo "\$disk_pct_raw" | sed 's/%//')
+
 uptime_sec=\$(cat /proc/uptime | awk '{print int(\$1)}')
 
 echo "CPU_USAGE:\$cpu_usage"
