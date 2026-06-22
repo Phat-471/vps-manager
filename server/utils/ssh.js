@@ -72,10 +72,20 @@ class SSHConnection {
         }
     }
 
-    /**
-     * Thực thi lệnh trên VPS
-     */
     executeCommand(command) {
+        // Tự động kiểm tra và thêm cơ chế đợi khóa dpkg/apt cho các lệnh apt-get hoặc apt
+        if (command && (command.includes('apt-get ') || command.includes('apt ')) && !command.includes('lock-frontend') && process.platform !== 'win32') {
+            const waitAptCmd = `
+if [ -f /etc/debian_version ]; then
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do
+        echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống (dpkg lock)..."
+        sleep 3
+    done
+fi
+`;
+            command = waitAptCmd + '\n' + command;
+        }
+
         return new Promise((resolve, reject) => {
             if (!this.isConnected) {
                 return reject(new Error('Connection not established'));
