@@ -93,35 +93,37 @@ export default function Sidebar() {
       <div className="logo-container">VPS MANAGER</div>
 
       {currentVPS && (
-        <div className="vps-switcher-widget">
-          <div className="vps-switcher-status">
-            <span className={`vps-status-dot ${isConnected ? 'connected' : 'disconnected'}`}></span>
-            <strong className="vps-active-name" title={currentVPS.host}>
-              {currentVPS.name || currentVPS.host}
-            </strong>
-          </div>
-          {currentVPS.id !== 'vps_local' && (
-            <div className="vps-actions-buttons">
-              <button 
-                className="btn btn-secondary btn-sm" 
-                onClick={() => setActivePage('vps-modal')}
-                style={{ width: '100%', justifyContent: 'center' }}
-              >
-                Đổi VPS
-              </button>
-              <button 
-                className="btn btn-danger btn-sm" 
-                onClick={() => {
-                  if (window.confirm('Bạn có chắc muốn ngắt kết nối VPS hiện tại?')) {
-                    disconnectVPS();
-                  }
-                }}
-                style={{ width: '100%', justifyContent: 'center', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: 'none' }}
-              >
-                <LogOut size={12} /> Ngắt kết nối
-              </button>
+        <div className="double-bezel-outer" style={{ marginBottom: '20px', padding: '4px', borderRadius: '16px' }}>
+          <div className="double-bezel-inner" style={{ padding: '12px', borderRadius: '12px', background: 'rgba(10, 10, 26, 0.4)' }}>
+            <div className="vps-switcher-status">
+              <span className={`vps-status-dot ${isConnected ? 'connected' : 'disconnected'}`}></span>
+              <strong className="vps-active-name" title={currentVPS.host}>
+                {currentVPS.name || currentVPS.host}
+              </strong>
             </div>
-          )}
+            {currentVPS.id !== 'vps_local' && (
+              <div className="vps-actions-buttons">
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  onClick={() => setActivePage('vps-modal')}
+                  style={{ width: '100%', justifyContent: 'center' }}
+                >
+                  Đổi VPS
+                </button>
+                <button 
+                  className="btn btn-danger btn-sm" 
+                  onClick={() => {
+                    if (window.confirm('Bạn có chắc muốn ngắt kết nối VPS hiện tại?')) {
+                      disconnectVPS();
+                    }
+                  }}
+                  style={{ width: '100%', justifyContent: 'center', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: 'none' }}
+                >
+                  <LogOut size={12} /> Ngắt kết nối
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
