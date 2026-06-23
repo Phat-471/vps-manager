@@ -18,10 +18,44 @@ const SOFTWARE_LIST = [
   { id: 'certbot', name: 'Let\'s Encrypt', icon: 'fa-solid fa-lock', color: '#ffc107', desc: 'Cài đặt Certbot để tự động đăng ký và gia hạn SSL miễn phí.' }
 ];
 
+const INSTALL_COMMANDS = {
+  lemp: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx mysql-server php-fpm php-mysql && systemctl enable nginx && systemctl enable mysql && systemctl start nginx && systemctl start mysql",
+  nginx: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx && systemctl enable nginx && systemctl start nginx && nginx -v",
+  mysql: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server && systemctl enable mysql && systemctl start mysql && mysql --version",
+  php: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-cli php-common php-curl php-gd php-mbstring php-xml && FPM_SERVICE=$(systemctl list-units --type=service --all | grep php | grep fpm | awk '{print $1}' | head -1) && if [ -n \"$FPM_SERVICE\" ]; then systemctl enable $FPM_SERVICE && systemctl start $FPM_SERVICE; fi && php -v",
+  apache: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y apache2 && systemctl enable apache2 && systemctl start apache2 && apache2 -v",
+  nodejs: "curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs && npm install -g pm2 && if ! id -u pm2user &>/dev/null; then useradd -m -s /bin/bash pm2user; fi && pm2 startup systemd 2>/dev/null || true && node --version && npm --version && pm2 --version",
+  docker: "apt-get update && apt-get install -y ca-certificates curl gnupg && install -m 0755 -d /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && chmod a+r /etc/apt/keyrings/docker.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable\" | tee /etc/apt/sources.list.d/docker.list > /dev/null && apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && systemctl enable docker && systemctl start docker && docker --version",
+  java: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y openjdk-17-jdk openjdk-17-jre && java -version",
+  mongodb: "curl -fsSL https://pgp.mongodb.com/server-7.0.asc | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor && echo \"deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse\" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y mongodb-org && systemctl enable mongod && systemctl start mongod && mongod --version",
+  redis: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server && systemctl enable redis-server && systemctl start redis-server && redis-cli --version",
+  golang: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y golang-go && go version",
+  fail2ban: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban && systemctl enable fail2ban && systemctl start fail2ban && fail2ban-client --version",
+  certbot: "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y certbot python3-certbot-nginx && certbot --version"
+};
+
+const UNINSTALL_COMMANDS = {
+  nginx: 'apt-get purge -y nginx nginx-common nginx-core && apt-get autoremove -y',
+  mysql: 'apt-get purge -y mysql-server mysql-client mysql-common && apt-get autoremove -y',
+  php: 'apt-get purge -y php-fpm php-cli php-common php-mysql php-curl php-gd php-mbstring php-xml php-zip php-bcmath php-soap php-intl php-readline && apt-get autoremove -y',
+  nodejs: 'apt-get purge -y nodejs && apt-get autoremove -y && rm -rf $HOME/.nvm /root/.nvm',
+  docker: 'apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && apt-get autoremove -y',
+  java: 'apt-get purge -y openjdk-17-jdk openjdk-17-jre && apt-get autoremove -y',
+  mongodb: 'apt-get purge -y mongodb-org mongodb-org-server mongodb-org-shell mongodb-org-mongos mongodb-org-tools && apt-get autoremove -y',
+  redis: 'apt-get purge -y redis-server redis-tools && apt-get autoremove -y',
+  golang: 'apt-get purge -y golang-go && apt-get autoremove -y',
+  fail2ban: 'apt-get purge -y fail2ban && apt-get autoremove -y',
+  certbot: 'apt-get purge -y certbot python3-certbot-nginx && apt-get autoremove -y',
+  composer: 'rm -f /usr/local/bin/composer',
+  apache: 'apt-get purge -y apache2 && apt-get autoremove -y',
+  lemp: 'apt-get purge -y nginx nginx-common nginx-core mysql-server mysql-client mysql-common php-fpm php-cli php-common php-mysql && apt-get autoremove -y'
+};
+
 export default function Services() {
-  const { apiCall, showToast, isConnected } = useVPS();
+  const { apiCall, showToast, isConnected, socket, currentVPS } = useVPS();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState('>> Sẵn sàng. Chờ lệnh...\n');
   const [installedSoftware, setInstalledSoftware] = useState({});
 
@@ -41,10 +75,8 @@ export default function Services() {
 
   const checkInstalledSoftware = async () => {
     try {
-      // Calls SoftwareController.getInstalledSoftware
       const result = await apiCall('/api/software/installed', 'POST');
       if (result.success) {
-        // Map backend output format
         const softStatus = result.data?.softwareStatus || {};
         setInstalledSoftware(softStatus);
       }
@@ -59,6 +91,37 @@ export default function Services() {
       checkInstalledSoftware();
     }
   }, [isConnected]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleOutput = (data) => {
+      setLogs(prev => prev + data);
+    };
+
+    const handleEnded = ({ code, error }) => {
+      setLoading(false);
+      setRunning(false);
+      if (code === 0) {
+        setLogs(prev => prev + `\n>> [${new Date().toLocaleTimeString()}] THÀNH CÔNG: Hoàn tất tiến trình cài đặt/gỡ phần mềm!\n`);
+        showToast('Hoàn tất tiến trình thành công!', 'success');
+        checkInstalledSoftware();
+        loadServices();
+      } else {
+        const errMsg = error || `Mã lỗi trả về: ${code}`;
+        setLogs(prev => prev + `\n>> [${new Date().toLocaleTimeString()}] THẤT BẠI: ${errMsg}\n`);
+        showToast('Thao tác thất bại: ' + errMsg, 'error');
+      }
+    };
+
+    socket.on('task:output', handleOutput);
+    socket.on('task:ended', handleEnded);
+
+    return () => {
+      socket.off('task:output', handleOutput);
+      socket.off('task:ended', handleEnded);
+    };
+  }, [socket]);
 
   const handleAction = async (serviceName, action) => {
     showToast(`Đang thực hiện ${action} cho dịch vụ ${serviceName}...`, 'info');
@@ -75,57 +138,61 @@ export default function Services() {
   };
 
   const handleInstallSoftware = async (softwareId) => {
+    if (!isConnected || !socket) {
+      showToast('Không thể kết nối WebSocket. Vui lòng kết nối VPS trước.', 'error');
+      return;
+    }
+    const cmd = INSTALL_COMMANDS[softwareId];
+    if (!cmd) {
+      showToast(`Không tìm thấy lệnh cài đặt cho ${softwareId}`, 'error');
+      return;
+    }
     if (!window.confirm(`Bạn muốn bắt đầu quá trình cài đặt ${softwareId}?`)) return;
 
-    showToast(`Đang tiến hành cài đặt ${softwareId} ở chế độ ngầm...`, 'info');
-    setLogs(prev => prev + `>> [CÀI ĐẶT] ${new Date().toLocaleTimeString()}: Bắt đầu cài đặt ${softwareId}...\n`);
-
-    try {
-      // Maps to matching installers in SoftwareController
-      const endpoint = `/api/software/install-${softwareId}`;
-      const result = await apiCall(endpoint, 'POST');
-      if (result.success) {
-        showToast(`Bắt đầu tiến trình cài đặt ${softwareId} thành công`, 'success');
-        setLogs(prev => prev + `>> [CÀI ĐẶT] ${new Date().toLocaleTimeString()}: ${result.message || 'Thành công'}\n`);
-        checkInstalledSoftware();
-      }
-    } catch (err) {
-      showToast(`Lỗi cài đặt ${softwareId}`, 'error');
-    }
+    setLoading(true);
+    setRunning(true);
+    setLogs(`>> [CÀI ĐẶT] ${new Date().toLocaleTimeString()}: Bắt đầu cài đặt ${softwareId}...\n`);
+    socket.emit('task:run', {
+      vpsConfig: currentVPS,
+      command: cmd
+    });
   };
 
-
   const handleUninstallSoftware = async (softwareId) => {
+    if (!isConnected || !socket) {
+      showToast('Không thể kết nối WebSocket. Vui lòng kết nối VPS trước.', 'error');
+      return;
+    }
+    const cmd = UNINSTALL_COMMANDS[softwareId];
+    if (!cmd) {
+      showToast(`Không tìm thấy lệnh gỡ cài đặt cho ${softwareId}`, 'error');
+      return;
+    }
     if (!window.confirm(`CẢNH BÁO: Bạn có chắc chắn muốn gỡ cài đặt hoàn toàn ${softwareId} khỏi VPS? Thao tác này sẽ xóa mọi cấu hình và tệp liên quan.`)) return;
 
-    showToast(`Đang tiến hành gỡ cài đặt ${softwareId}...`, 'info');
-    setLogs(prev => prev + `>> [GỠ CÀI ĐẶT] ${new Date().toLocaleTimeString()}: Bắt đầu gỡ cài đặt ${softwareId}...\n`);
-
-    try {
-      const result = await apiCall('/api/software/uninstall', 'POST', { softwareId });
-      if (result.success) {
-        showToast(`Đã gỡ cài đặt ${softwareId} thành công`, 'success');
-        setLogs(prev => prev + `>> [GỠ CÀI ĐẶT] ${new Date().toLocaleTimeString()}: ${result.message || 'Thành công'}\n`);
-        checkInstalledSoftware();
-      }
-    } catch (err) {
-      showToast(`Lỗi gỡ cài đặt ${softwareId}: ` + err.message, 'error');
-    }
+    setLoading(true);
+    setRunning(true);
+    setLogs(`>> [GỠ CÀI ĐẶT] ${new Date().toLocaleTimeString()}: Bắt đầu gỡ cài đặt ${softwareId}...\n`);
+    socket.emit('task:run', {
+      vpsConfig: currentVPS,
+      command: cmd
+    });
   };
 
   const handleUpdateSystem = async () => {
+    if (!isConnected || !socket) {
+      showToast('Không thể kết nối WebSocket. Vui lòng kết nối VPS trước.', 'error');
+      return;
+    }
     if (!window.confirm('Bạn có chắc chắn muốn cập nhật toàn bộ hệ thống? (apt-get update & upgrade)')) return;
 
-    showToast('Đang tiến hành cập nhật hệ thống...', 'info');
-    try {
-      const result = await apiCall('/api/software/update', 'POST');
-      if (result.success) {
-        showToast('Cập nhật hệ thống thành công!', 'success');
-        setLogs(prev => prev + `\n>> [HỆ THỐNG] ${new Date().toLocaleTimeString()}: ${result.message || 'Đã nâng cấp xong'}`);
-      }
-    } catch (err) {
-      showToast('Cập nhật hệ thống thất bại: ' + err.message, 'error');
-    }
+    setLoading(true);
+    setRunning(true);
+    setLogs(`>> [HỆ THỐNG] ${new Date().toLocaleTimeString()}: Bắt đầu cập nhật hệ thống...\n`);
+    socket.emit('task:run', {
+      vpsConfig: currentVPS,
+      command: 'apt-get update && apt-get upgrade -y'
+    });
   };
 
   return (

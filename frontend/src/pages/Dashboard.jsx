@@ -8,6 +8,7 @@ export default function Dashboard() {
   const [cpu, setCpu] = useState(0);
   const [ram, setRam] = useState({ usage: 0, total: 'Đang tải...', used: 'Đang tải...' });
   const [disk, setDisk] = useState({ usage: 0, total: 'Đang tải...', used: 'Đang tải...' });
+  const [monitorData, setMonitorData] = useState(null);
 
   // Lịch sử tài nguyên (Historical Stats)
   const [historyData, setHistoryData] = useState([]);
@@ -629,6 +630,7 @@ export default function Dashboard() {
 
     // Listen to real-time socket updates
     socket.on('monitor:data', (data) => {
+      setMonitorData(data);
       if (data.cpu) {
         setCpu(Math.round(data.cpu.usage));
         setCpuInfo({
@@ -851,6 +853,105 @@ export default function Dashboard() {
           <button className="btn" onClick={() => setShowSetupModal(true)} style={{ flexShrink: 0, background: 'rgba(245,158,11,0.2)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '600' }}>
             Đặt mật khẩu ngay
           </button>
+        </div>
+      )}
+
+      {/* Smart Resource Warning Banner */}
+      {monitorData && (cpu > 90 || ram.usage > 90 || disk.usage > 90) && (
+        <div className="card-glass p-5 rounded-xl mb-6 border border-red-500/20" style={{ background: 'rgba(239, 68, 68, 0.05)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+            <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '8px', borderRadius: '10px', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Activity size={20} className="animate-pulse" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h4 style={{ fontSize: '14px', fontWeight: '700', color: '#fca5a5', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                CẢNH BÁO: TÀI NGUYÊN HỆ THỐNG ĐANG QUÁ TẢI (
+                {cpu > 90 && 'CPU '}
+                {ram.usage > 90 && 'RAM '}
+                {disk.usage > 90 && 'DISK '}
+                &gt; 90%)
+              </h4>
+              <p style={{ fontSize: '12px', color: '#9ca3af', lineHeight: '1.5' }}>
+                Hệ thống phát hiện tài nguyên máy chủ đang ở mức giới hạn nguy hiểm. Dưới đây là phân tích tiến trình ngốn tài nguyên và đề xuất hướng xử lý:
+              </p>
+
+              {/* Resource hoggers lists */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginTop: '14px' }}>
+                {cpu > 90 && monitorData.topCpu && monitorData.topCpu.length > 0 && (
+                  <div style={{ background: 'rgba(0,0,0,0.25)', padding: '12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#c084fc', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.5px' }}>
+                      Top Tiến trình ngốn CPU nhất:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {monitorData.topCpu.slice(0, 3).map((p, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'monospace', color: '#e5e7eb' }}>
+                          <span>{idx+1}. {p.name} (PID: {p.pid})</span>
+                          <strong style={{ color: '#d8b4fe' }}>{p.cpu}% CPU</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {ram.usage > 90 && monitorData.topMem && monitorData.topMem.length > 0 && (
+                  <div style={{ background: 'rgba(0,0,0,0.25)', padding: '12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#22d3ee', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.5px' }}>
+                      Top Tiến trình ngốn RAM nhất:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {monitorData.topMem.slice(0, 3).map((p, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'monospace', color: '#e5e7eb' }}>
+                          <span>{idx+1}. {p.name} (PID: {p.pid})</span>
+                          <strong style={{ color: '#67e8f9' }}>{p.mem}% RAM</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Actionable recommendations */}
+              <div style={{ marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', fontWeight: '600', color: '#f3f4f6' }}>Đề xuất giải quyết nhanh:</span>
+                {ram.usage > 90 && (
+                  <button 
+                    onClick={handleCleanCache} 
+                    className="btn btn-secondary btn-sm"
+                    disabled={actionLoading}
+                    style={{ background: 'rgba(168, 85, 247, 0.1)', borderColor: 'rgba(168, 85, 247, 0.2)', color: '#d8b4fe' }}
+                  >
+                    Giải phóng RAM Cache
+                  </button>
+                )}
+                {disk.usage > 90 && (
+                  <button 
+                    onClick={handleCleanLogs} 
+                    className="btn btn-secondary btn-sm"
+                    disabled={actionLoading}
+                    style={{ background: 'rgba(249, 115, 22, 0.1)', borderColor: 'rgba(249, 115, 22, 0.2)', color: '#ffedd5' }}
+                  >
+                    Dọn dẹp logs & rác đĩa
+                  </button>
+                )}
+                {(cpu > 90 || ram.usage > 90) && (
+                  <button 
+                    onClick={() => setActivePage('services')} 
+                    className="btn btn-secondary btn-sm"
+                    style={{ color: '#93c5fd', background: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.2)' }}
+                  >
+                    Khởi động lại dịch vụ
+                  </button>
+                )}
+                <button 
+                  onClick={handleReboot} 
+                  className="btn btn-danger btn-sm"
+                  disabled={actionLoading}
+                >
+                  Reboot VPS khẩn cấp
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

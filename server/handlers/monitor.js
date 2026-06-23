@@ -58,10 +58,17 @@ fi
 cpu_cores=\$(nproc)
 cpu_model=\$(lscpu | grep "Model name" | cut -d':' -f2 | xargs 2>/dev/null || cat /proc/cpuinfo | grep "model name" | head -1 | cut -d':' -f2 | xargs 2>/dev/null || echo "Generic CPU")
 
-mem_vals=\$(free -b | grep Mem | awk '{print \$2,\$3}')
-read -r mem_total mem_used <<EOF
+free -b | grep -q available 2>/dev/null
+HAS_AVAIL=\$?
+mem_vals=\$(free -b | grep Mem | awk '{print \$2,\$3,\$7}')
+read -r mem_total mem_used_raw mem_avail <<EOF
 \$mem_vals
 EOF
+if [ "\$HAS_AVAIL" -eq 0 ] && [ -n "\$mem_avail" ] && [ "\$mem_avail" -ne 0 ] 2>/dev/null; then
+    mem_used=\$((mem_total - mem_avail))
+else
+    mem_used=\$mem_used_raw
+fi
 
 disk_vals=\$(df -h / | tail -1 | awk '{print \$2,\$3,\$5}')
 read -r disk_total disk_used disk_pct_raw <<EOF
@@ -70,6 +77,15 @@ EOF
 disk_pct=\$(echo "\$disk_pct_raw" | sed 's/%//')
 
 uptime_sec=\$(cat /proc/uptime | awk '{print int(\$1)}')
+
+mem_used_pct=\$(( mem_used * 100 / mem_total ))
+if [ "\$cpu_usage" -gt 90 ] || [ "\$mem_used_pct" -gt 90 ] 2>/dev/null; then
+    top_cpu=\$(ps -Ao pid,pcpu,pmem,comm --sort=-pcpu | head -n 6 | tail -n 5 | awk '{print \$1\",\"\$2\",\"\$3\",\"\$4}' | tr '\\n' ';')
+    top_mem=\$(ps -Ao pid,pcpu,pmem,comm --sort=-pmem | head -n 6 | tail -n 5 | awk '{print \$1\",\"\$2\",\"\$3\",\"\$4}' | tr '\\n' ';')
+else
+    top_cpu=""
+    top_mem=""
+fi
 
 echo "CPU_USAGE:\$cpu_usage"
 echo "CPU_CORES:\$cpu_cores"
@@ -80,6 +96,8 @@ echo "DISK_TOTAL:\$disk_total"
 echo "DISK_USED:\$disk_used"
 echo "DISK_PCT:\$disk_pct"
 echo "UPTIME:\$uptime_sec"
+echo "TOP_CPU:\$top_cpu"
+echo "TOP_MEM:\$top_mem"
 `;
 
     // Ensure state map has the entry for this VPS
@@ -154,11 +172,21 @@ echo "UPTIME:\$uptime_sec"
                             used: usedMem
                         },
                         disk: {
-                            usage: 50,
-                            total: '256 GB',
-                            used: '128 GB'
+                            usage: 92, // Mock 92% to trigger smart warning banner locally for testing
+                            total: '40 GB',
+                            used: '36.8 GB'
                         },
-                        uptime: os.uptime()
+                        uptime: os.uptime(),
+                        topCpu: [
+                            { pid: 3204, cpu: 88.5, mem: 12.4, name: 'mysqld' },
+                            { pid: 5612, cpu: 45.2, mem: 4.1, name: 'nginx' },
+                            { pid: 1244, cpu: 12.0, mem: 8.5, name: 'php-fpm' }
+                        ],
+                        topMem: [
+                            { pid: 3204, cpu: 88.5, mem: 42.5, name: 'mysqld' },
+                            { pid: 8904, cpu: 0.5, mem: 28.0, name: 'node-app' },
+                            { pid: 1244, cpu: 12.0, mem: 18.5, name: 'php-fpm' }
+                        ]
                     };
 
                     state.lastData = data;
@@ -200,6 +228,25 @@ echo "UPTIME:\$uptime_sec"
             const diskUsed = stats['DISK_USED'] || 'N/A';
             const diskPct = parseFloat(stats['DISK_PCT']) || 0;
             const uptimeSec = parseInt(stats['UPTIME']) || 0;
+            const topCpuRaw = stats['TOP_CPU'] || '';
+            const topMemRaw = stats['TOP_MEM'] || '';
+
+            // Parse top processes "pid,cpu,mem,name;..."
+            const parseTopProcesses = (rawStr) => {
+                if (!rawStr) return [];
+                return rawStr.split(';').filter(Boolean).map(p => {
+                    const [pid, cpu, mem, name] = p.split(',');
+                    return {
+                        pid: parseInt(pid) || 0,
+                        cpu: parseFloat(cpu) || 0,
+                        mem: parseFloat(mem) || 0,
+                        name: name || 'unknown'
+                    };
+                });
+            };
+
+            const topCpu = parseTopProcesses(topCpuRaw);
+            const topMem = parseTopProcesses(topMemRaw);
 
             const data = {
                 timestamp: Date.now(),
@@ -218,7 +265,9 @@ echo "UPTIME:\$uptime_sec"
                     total: diskTotal,
                     used: diskUsed
                 },
-                uptime: uptimeSec
+                uptime: uptimeSec,
+                topCpu,
+                topMem
             };
 
             state.lastData = data;
