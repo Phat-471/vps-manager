@@ -791,12 +791,21 @@ async function checkPanelUpdateStatus(req, res) {
             const localCommit = localCommitRes.stdout.trim();
             const remoteCommit = remoteCommitRes.stdout.trim();
 
-            // Lấy thông tin phiên bản hiện tại
-            const currentVersionRes = await ssh.executeCommand('cd /var/www/vps-manager && git log -1 --pretty=format:"%h (%cr) - %s"');
-            const currentVersion = currentVersionRes.stdout.trim();
+            const pkgVersion = require('../../package.json').version;
+            const currentVersion = `v${pkgVersion} (Commit: ${localCommit.substring(0, 7)})`;
 
             const hasUpdate = localCommit !== remoteCommit;
             
+            let remoteVersion = pkgVersion;
+            const remotePkgRes = await ssh.executeCommand('cd /var/www/vps-manager && git show @{u}:package.json 2>/dev/null');
+            if (remotePkgRes.code === 0) {
+                try {
+                    const remotePkg = JSON.parse(remotePkgRes.stdout);
+                    remoteVersion = remotePkg.version;
+                } catch (e) {}
+            }
+            const latestVersion = `v${remoteVersion} (Commit: ${remoteCommit.substring(0, 7)})`;
+
             let changelog = [];
             if (hasUpdate) {
                 // Lấy danh sách các commit mới ở remote chưa được pull về
@@ -811,12 +820,13 @@ async function checkPanelUpdateStatus(req, res) {
                 localCommit,
                 remoteCommit,
                 currentVersion,
+                latestVersion,
                 changelog
             });
         } else {
             // Chế độ Tệp nhị phân (Binary Mode)
             const pkgVersion = require('../../package.json').version;
-            const currentVersion = `v${pkgVersion} (Chế độ Tệp nhị phân Binary)`;
+            const currentVersion = `v${pkgVersion}`;
 
             try {
                 const latestRelease = await getLatestGitHubRelease();

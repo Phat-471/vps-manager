@@ -18,7 +18,7 @@ export default function Maintenance() {
   const [configuringSSL, setConfiguringSSL] = useState(false);
 
   // Panel Update Check
-  const [updateStatus, setUpdateStatus] = useState({ checked: false, hasUpdate: false, currentVersion: '', changelog: [] });
+  const [updateStatus, setUpdateStatus] = useState({ checked: false, hasUpdate: false, currentVersion: '', latestVersion: '', changelog: [] });
   const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   const softwareList = [
@@ -56,6 +56,7 @@ export default function Maintenance() {
           checked: true,
           hasUpdate: res.hasUpdate,
           currentVersion: res.currentVersion,
+          latestVersion: res.latestVersion || '',
           changelog: res.changelog || []
         });
       } else {
@@ -251,15 +252,24 @@ export default function Maintenance() {
             </div>
             
             {updateStatus.checked && (
-              <div className="text-[11px] font-mono leading-relaxed bg-white/5 p-2.5 rounded-lg border border-white/5">
-                <div className="text-gray-300 truncate" title={updateStatus.currentVersion}>
-                  {updateStatus.currentVersion || 'Không rõ phiên bản'}
+              <div className="text-[11px] font-mono leading-relaxed bg-white/5 p-2.5 rounded-lg border border-white/5 space-y-1">
+                <div>
+                  <span className="text-gray-400">Hiện tại:</span>{' '}
+                  <span className="text-gray-200">{updateStatus.currentVersion || 'Không rõ'}</span>
                 </div>
-                {updateStatus.hasUpdate ? (
-                  <span className="text-yellow-400 font-bold block mt-1">● Có bản cập nhật mới!</span>
-                ) : (
-                  <span className="text-green-400 block mt-1">✓ Đang chạy bản mới nhất</span>
+                {updateStatus.hasUpdate && updateStatus.latestVersion && (
+                  <div>
+                    <span className="text-yellow-400">Mới nhất:</span>{' '}
+                    <span className="text-yellow-300 font-semibold">{updateStatus.latestVersion}</span>
+                  </div>
                 )}
+                <div className="pt-1">
+                  {updateStatus.hasUpdate ? (
+                    <span className="text-yellow-400 font-bold block">● Có bản cập nhật mới!</span>
+                  ) : (
+                    <span className="text-green-400 block">✓ Đang chạy bản mới nhất</span>
+                  )}
+                </div>
               </div>
             )}
 
