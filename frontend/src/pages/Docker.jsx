@@ -21,6 +21,42 @@ import {
   Code
 } from 'lucide-react';
 
+const DOCKER_TEMPLATES = [
+  {
+    name: 'WordPress Blog',
+    image: 'wordpress:latest',
+    desc: 'Triển khai WordPress CMS chạy trên Apache. Cần liên kết database.',
+    ports: [{ host: '8080', container: '80' }],
+    env: [
+      { key: 'WORDPRESS_DB_HOST', value: '127.0.0.1:3306' },
+      { key: 'WORDPRESS_DB_USER', value: 'wordpress' },
+      { key: 'WORDPRESS_DB_PASSWORD', value: 'secret' },
+      { key: 'WORDPRESS_DB_NAME', value: 'wordpress' }
+    ]
+  },
+  {
+    name: 'Node.js Runtime',
+    image: 'node:18-alpine',
+    desc: 'Môi trường Node.js lightweight chạy các ứng dụng script JavaScript.',
+    ports: [{ host: '3000', container: '3000' }],
+    env: [{ key: 'NODE_ENV', value: 'production' }]
+  },
+  {
+    name: 'Redis Cache',
+    image: 'redis:alpine',
+    desc: 'Hệ thống in-memory database để lưu trữ cache tốc độ cực cao.',
+    ports: [{ host: '6379', container: '6379' }],
+    env: []
+  },
+  {
+    name: 'Nginx Web Server',
+    image: 'nginx:alpine',
+    desc: 'Máy chủ Web Nginx siêu nhẹ để phân phối web tĩnh hoặc Reverse Proxy.',
+    ports: [{ host: '8080', container: '80' }],
+    env: []
+  }
+];
+
 export default function Docker() {
   const { apiCall, showToast, isConnected, socket, currentVPS } = useVPS();
   const [activeTab, setActiveTab] = useState('containers'); // 'containers' | 'images' | 'compose'
@@ -364,6 +400,16 @@ services:
     }
   };
 
+  const handleLoadTemplate = (template) => {
+    setImageName(template.image);
+    setContainerName(template.name.toLowerCase().replace(/[^a-z0-9]/g, '_'));
+    setPortsList(template.ports.length > 0 ? template.ports : [{ host: '', container: '' }]);
+    setEnvList(template.env.length > 0 ? template.env : [{ key: '', value: '' }]);
+    setVolumesList([{ host: '', container: '' }]);
+    setRestartPolicy('always');
+    setShowDeployModal(true);
+  };
+
   const handleDeploySubmit = async (e) => {
     e.preventDefault();
     if (!imageName.trim()) {
@@ -507,6 +553,13 @@ services:
         >
           <Layers size={16} className="text-purple-400" />
           Docker Compose ({composeProjects.length})
+        </button>
+        <button 
+          className={`db-tab-item ${activeTab === 'templates' ? 'active' : ''}`}
+          onClick={() => setActiveTab('templates')}
+        >
+          <PlusCircle size={16} className="text-green-400" />
+          Mẫu Docker nhanh
         </button>
       </div>
 
@@ -783,6 +836,36 @@ services:
                   </table>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB 4: TEMPLATES */}
+          {activeTab === 'templates' && (
+            <div className="grid-2 md:grid-3 gap-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+              {DOCKER_TEMPLATES.map((tpl) => (
+                <div key={tpl.name} className="card-glass p-5 rounded-xl flex flex-col justify-between space-y-4">
+                  <div className="space-y-2">
+                    <h3 className="text-base font-semibold text-gray-200 flex items-center gap-2">
+                      <Layers size={18} className="text-green-400" />
+                      {tpl.name}
+                    </h3>
+                    <p className="text-xs text-gray-400 leading-relaxed font-normal">{tpl.desc}</p>
+                    <div className="pt-2 font-mono text-[10px] text-indigo-300">
+                      <div>Image: {tpl.image}</div>
+                      {tpl.ports.map((p, idx) => (
+                        <div key={idx}>Port: {p.host}:{p.container}</div>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleLoadTemplate(tpl)}
+                    className="btn btn-primary btn-sm btn-block text-xs"
+                    style={{ padding: '8px 12px' }}
+                  >
+                    Sử dụng mẫu này
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 

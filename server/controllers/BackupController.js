@@ -176,6 +176,46 @@ if [ -n "$TARGET_FILE" ] && [ -f "$TARGET_FILE" ] && [ -n "$RCLONE_REMOTE" ]; th
 fi
 `;
 
+async function sendTelegramBackupNotification(message) {
+    try {
+        const configPath = path.join(__dirname, '../data/alerts_config.json');
+        if (!fs.existsSync(configPath)) return;
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (config && config.channels && config.channels.telegram && config.channels.telegram.enabled) {
+            const { botToken, chatId } = config.channels.telegram;
+            if (botToken && chatId) {
+                const https = require('https');
+                const postData = JSON.stringify({
+                    chat_id: chatId,
+                    text: message,
+                    parse_mode: 'HTML'
+                });
+                const options = {
+                    hostname: 'api.telegram.org',
+                    path: `/bot${botToken}/sendMessage`,
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Content-Length': Buffer.byteLength(postData)
+                    }
+                };
+                await new Promise((resolve, reject) => {
+                    const req = https.request(options, (res) => {
+                        let body = '';
+                        res.on('data', chunk => body += chunk);
+                        res.on('end', () => resolve(body));
+                    });
+                    req.on('error', reject);
+                    req.write(postData);
+                    req.end();
+                });
+            }
+        }
+    } catch (e) {
+        console.error('Failed to send Telegram backup notification:', e.message);
+    }
+}
+
 /**
  * Đảm bảo script backup tồn tại và có quyền thực thi
  */
@@ -297,13 +337,20 @@ async function createBackup(req, res) {
 
         const result = await ssh.executeCommand(command);
 
+        const targetInfo = type === 'dir' ? `Thư mục ${source}` : `Database ${database}`;
+
         if (result.code !== 0 || result.stdout.includes('ERROR:')) {
+            const errorMsg = `⚠️ <b>[VPS Backup Alert]</b>\n\n<b>Trạng thái:</b> Thất bại ❌\n<b>Đối tượng:</b> <code>${targetInfo}</code>\n<b>Chi tiết lỗi:</b>\n<pre>${result.stderr || result.stdout || 'Unknown error'}</pre>`;
+            await sendTelegramBackupNotification(errorMsg);
             return res.status(500).json({
                 success: false,
                 error: 'Sao lưu thất bại',
                 log: result.stdout + '\n' + result.stderr
             });
         }
+
+        const successMsg = `✅ <b>[VPS Backup Alert]</b>\n\n<b>Trạng thái:</b> Thành công 🎯\n<b>Đối tượng:</b> <code>${targetInfo}</code>\n<b>Lưu trữ:</b> Cục bộ (local)${req.body.rcloneRemote ? ` & Đồng bộ Cloud (${req.body.rcloneRemote})` : ''}`;
+        await sendTelegramBackupNotification(successMsg);
 
         logActivity('Tạo Bản sao lưu', `Đã tạo bản sao lưu ${type} (${type === 'dir' ? source : database})`, vpsConfig.id);
         res.json({

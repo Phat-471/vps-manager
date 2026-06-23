@@ -1474,12 +1474,14 @@ export default function WebServer() {
                 <div className="form-group">
                   <label>Loại Website</label>
                   <select value={type} onChange={e => setType(e.target.value)} className="input-glass">
-                    <option value="php">PHP App (Laravel, WordPress...)</option>
+                    <option value="php">PHP App (Laravel, PHP generic...)</option>
+                    <option value="wordpress">WordPress (Tối ưu hóa WP)</option>
                     <option value="static">Static HTML/JS</option>
+                    <option value="spa">Single Page App (React, Vue, SPA Router...)</option>
                     <option value="proxy">Reverse Proxy (Node.js, Python...)</option>
                   </select>
                 </div>
-                {type === 'php' && (
+                {(type === 'php' || type === 'wordpress') && (
                   <div className="form-group">
                     <label>Phiên bản PHP (PHP Version)</label>
                     <select

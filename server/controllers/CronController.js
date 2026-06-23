@@ -159,12 +159,18 @@ async function addJob(req, res) {
         const crontabText = await getCrontabText(ssh);
         const blocks = parseCrontab(crontabText);
 
+        const logSlug = (name || 'job').toLowerCase().replace(/[^a-z0-9]/g, '_');
+        let finalCommand = command.trim();
+        if (!finalCommand.includes('>/var/log/vps-manager-cron-') && !finalCommand.includes('> /var/log/vps-manager-cron-')) {
+            finalCommand = `${finalCommand} > /var/log/vps-manager-cron-${logSlug}.log 2>&1`;
+        }
+
         // Thêm job mới vào cuối danh sách block
         blocks.push({
             type: 'job',
             name: name || 'Tác vụ tự do',
             schedule: schedule.trim(),
-            command: command.trim(),
+            command: finalCommand,
             active: !!active
         });
 
@@ -199,7 +205,15 @@ async function editJob(req, res) {
         // Cập nhật thông tin
         if (name !== undefined) blocks[index].name = name;
         if (schedule !== undefined) blocks[index].schedule = schedule.trim();
-        if (command !== undefined) blocks[index].command = command.trim();
+        if (command !== undefined) {
+            const jobName = name !== undefined ? name : blocks[index].name;
+            const logSlug = (jobName || 'job').toLowerCase().replace(/[^a-z0-9]/g, '_');
+            let finalCommand = command.trim();
+            if (!finalCommand.includes('>/var/log/vps-manager-cron-') && !finalCommand.includes('> /var/log/vps-manager-cron-')) {
+                finalCommand = `${finalCommand} > /var/log/vps-manager-cron-${logSlug}.log 2>&1`;
+            }
+            blocks[index].command = finalCommand;
+        }
         if (active !== undefined) blocks[index].active = !!active;
 
         const newCrontabText = generateCrontab(blocks);
@@ -306,11 +320,35 @@ async function runJobManually(req, res) {
     }
 }
 
+async function getCronLog(req, res) {
+    try {
+        const { vpsConfig, name } = req.body;
+        if (!name) {
+            return res.status(400).json({ success: false, error: 'Thiếu tên tác vụ để đọc log' });
+        }
+        
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const logSlug = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const logPath = `/var/log/vps-manager-cron-${logSlug}.log`;
+        
+        const checkLog = await ssh.executeCommand(`test -f ${logPath} && echo "OK" || echo "NO"`);
+        if (checkLog.stdout.trim() !== 'OK') {
+            return res.json({ success: true, log: `(Chưa có dữ liệu nhật ký cho tác vụ "${name}". Hãy đảm bảo tác vụ đã chạy ít nhất một lần)` });
+        }
+        
+        const result = await ssh.executeCommand(`tail -n 500 ${logPath}`);
+        res.json({ success: true, log: result.stdout + result.stderr });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listJobs,
     addJob,
     editJob,
     toggleJob,
     deleteJob,
-    runJobManually
+    runJobManually,
+    getCronLog
 };

@@ -176,6 +176,23 @@ export default function Scheduler() {
     runTaskStream(`timeout 60 ${command}`);
   };
 
+  const handleViewCronLog = async (job) => {
+    setRunningJob(true);
+    setRunLog(`[Log Viewer] Đang đọc nhật ký cho tác vụ "${job.name}"...\n\n`);
+    try {
+      const res = await apiCall('/api/cron/log', 'POST', { name: job.name });
+      if (res.success) {
+        setRunLog(res.log);
+      } else {
+        setRunLog(`[LỖI] Không thể đọc nhật ký: ${res.error}`);
+      }
+    } catch (err) {
+      setRunLog(`[LỖI] Yêu cầu thất bại: ${err.message}`);
+    } finally {
+      setRunningJob(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -235,8 +252,8 @@ export default function Scheduler() {
                       <td className="p-4 font-mono text-gray-500">{idx + 1}</td>
                       <td className="p-4 font-semibold text-gray-200">{job.name}</td>
                       <td className="p-4 font-mono text-indigo-400">{job.schedule}</td>
-                      <td className="p-4 font-mono text-gray-300 text-xs truncate max-w-[250px]" title={job.command}>
-                        {job.command}
+                      <td className="p-4 font-mono text-gray-300 text-xs truncate max-w-[250px]" title={job.command.replace(/\s*>\s*\/var\/log\/vps-manager-cron-.*\.log\s*2>&1/g, '')}>
+                        {job.command.replace(/\s*>\s*\/var\/log\/vps-manager-cron-.*\.log\s*2>&1/g, '')}
                       </td>
                       <td className="p-4 text-center">
                         <button
@@ -249,6 +266,14 @@ export default function Scheduler() {
                       </td>
                       <td className="p-4 text-right">
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                          <button
+                            onClick={() => handleViewCronLog(job)}
+                            className="btn btn-glass btn-sm text-yellow-400"
+                            title="Xem nhật ký"
+                            style={{ padding: '6px' }}
+                          >
+                            <Terminal size={14} />
+                          </button>
                           <button
                             onClick={() => handleTestCron(job.command)}
                             className="btn btn-glass btn-sm text-green-400"

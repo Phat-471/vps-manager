@@ -20,8 +20,17 @@ async function listSites(req, res) {
             const content = config.stdout;
 
             let type = 'static';
-            if (content.includes('fastcgi_pass')) type = 'php';
-            if (content.includes('proxy_pass')) type = 'proxy';
+            if (content.includes('fastcgi_pass')) {
+                if (content.includes('WordPress Router') || content.includes('wp-admin')) {
+                    type = 'wordpress';
+                } else {
+                    type = 'php';
+                }
+            } else if (content.includes('try_files $uri $uri/ /index.html;')) {
+                type = 'spa';
+            } else if (content.includes('proxy_pass')) {
+                type = 'proxy';
+            }
 
             const rootMatch = content.match(/root\s+([^;]+);/);
             const root = rootMatch ? rootMatch[1].trim() : 'N/A';
@@ -83,7 +92,7 @@ async function addSite(req, res) {
         }
 
         let config = '';
-        if (type === 'php') {
+        if (type === 'php' || type === 'wordpress') {
             // Find actual FPM socket dynamically
             let fpmSock = `/run/php/php${phpVersion || ''}-fpm.sock`;
             const checkSock = await ssh.executeCommand(`[ -S "${fpmSock}" ] && echo "OK" || echo "NO"`);
@@ -101,7 +110,49 @@ async function addSite(req, res) {
                 }
             }
 
-            config = `
+            if (type === 'wordpress') {
+                config = `
+server {
+    listen 80;
+    server_name ${safeDomain};
+    root ${root};
+    index index.php index.html;
+    ${securityDirectives}
+
+    # WordPress Router
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # Block php files in uploads
+    location ~* /(?:uploads|files)/.*\\.php$ {
+        deny all;
+    }
+
+    # Deny access to hidden files
+    location ~ /\\.(?!well-known).* {
+        deny all;
+    }
+
+    location = /favicon.ico { log_not_found off; access_log off; }
+    location = /robots.txt { log_not_found off; access_log off; allow all; }
+
+    # Cache static files
+    location ~* \\.(css|gif|ico|jpeg|jpg|js|png|webp|woff|woff2|woff3|ttf|svg|otf)$ {
+        expires max;
+        log_not_found off;
+    }
+
+    location ~ \\.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${fpmSock};
+        fastcgi_intercept_errors on;
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
+    }
+}`;
+            } else {
+                config = `
 server {
     listen 80;
     server_name ${safeDomain};
@@ -118,6 +169,7 @@ server {
         fastcgi_pass unix:${fpmSock};
     }
 }`;
+            }
         } else if (type === 'proxy') {
             config = `
 server {
@@ -135,6 +187,25 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}`;
+        } else if (type === 'spa') {
+            config = `
+server {
+    listen 80;
+    server_name ${safeDomain};
+    root ${root};
+    index index.html;
+    ${securityDirectives}
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Cache static files
+    location ~* \\.(css|gif|ico|jpeg|jpg|js|png|webp|woff|woff2|woff3|ttf|svg|otf)$ {
+        expires max;
+        log_not_found off;
     }
 }`;
         } else {
