@@ -736,7 +736,40 @@ EOF`);
 }
 
 /**
- * Check Panel Update Status and Changelog from Git
+ * Helper to fetch the latest release from GitHub API
+ */
+function getLatestGitHubRelease() {
+    return new Promise((resolve, reject) => {
+        const https = require('https');
+        const options = {
+            hostname: 'api.github.com',
+            path: '/repos/Phat-471/vps-manager/releases/latest',
+            headers: {
+                'User-Agent': 'vps-management-tool'
+            }
+        };
+
+        https.get(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                try {
+                    if (res.statusCode !== 200) {
+                        return reject(new Error(`GitHub API error: ${res.statusCode}`));
+                    }
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        }).on('error', (err) => {
+            reject(err);
+        });
+    });
+}
+
+/**
+ * Check Panel Update Status and Changelog from Git or GitHub Releases
  */
 async function checkPanelUpdateStatus(req, res) {
     try {
@@ -745,44 +778,89 @@ async function checkPanelUpdateStatus(req, res) {
 
         // Kiểm tra thư mục Git tồn tại
         const checkGit = await ssh.executeCommand('cd /var/www/vps-manager && git rev-parse --is-inside-work-tree');
-        if (checkGit.code !== 0) {
+        const isGitMode = checkGit.code === 0;
+
+        if (isGitMode) {
+            // Chạy git fetch để cập nhật danh sách commit mới từ origin
+            await ssh.executeCommand('cd /var/www/vps-manager && git fetch');
+
+            // Lấy hash commit hiện tại và hash remote
+            const localCommitRes = await ssh.executeCommand('cd /var/www/vps-manager && git rev-parse HEAD');
+            const remoteCommitRes = await ssh.executeCommand('cd /var/www/vps-manager && git rev-parse @{u}');
+            
+            const localCommit = localCommitRes.stdout.trim();
+            const remoteCommit = remoteCommitRes.stdout.trim();
+
+            // Lấy thông tin phiên bản hiện tại
+            const currentVersionRes = await ssh.executeCommand('cd /var/www/vps-manager && git log -1 --pretty=format:"%h (%cr) - %s"');
+            const currentVersion = currentVersionRes.stdout.trim();
+
+            const hasUpdate = localCommit !== remoteCommit;
+            
+            let changelog = [];
+            if (hasUpdate) {
+                // Lấy danh sách các commit mới ở remote chưa được pull về
+                const changelogRes = await ssh.executeCommand('cd /var/www/vps-manager && git log HEAD..@{u} --pretty=format:"%h - %s (%cr)"');
+                changelog = changelogRes.stdout.trim().split('\n').filter(Boolean);
+            }
+
             return res.json({
-                success: false,
-                error: 'Mã nguồn không phải là git repository hoặc thư mục /var/www/vps-manager không tồn tại.'
+                success: true,
+                isGitMode: true,
+                hasUpdate,
+                localCommit,
+                remoteCommit,
+                currentVersion,
+                changelog
             });
+        } else {
+            // Chế độ Tệp nhị phân (Binary Mode)
+            const pkgVersion = require('../../package.json').version;
+            const currentVersion = `v${pkgVersion} (Chế độ Tệp nhị phân Binary)`;
+
+            try {
+                const latestRelease = await getLatestGitHubRelease();
+                const latestTag = latestRelease.tag_name; // VD: "v1.1.0" hoặc "1.1.0"
+                const cleanLatest = latestTag.replace(/^v/, '');
+                const cleanCurrent = pkgVersion.replace(/^v/, '');
+
+                const hasUpdate = cleanLatest !== cleanCurrent;
+
+                let changelog = [];
+                if (latestRelease.body) {
+                    // Lọc lấy các dòng bullet point từ mô tả release làm changelog
+                    changelog = latestRelease.body
+                        .split('\n')
+                        .map(line => line.trim())
+                        .filter(line => line.startsWith('-') || line.startsWith('*') || line.startsWith('•'))
+                        .slice(0, 10);
+                    
+                    if (changelog.length === 0) {
+                        changelog = [latestRelease.name || latestRelease.tag_name];
+                    }
+                } else {
+                    changelog = [latestRelease.name || latestRelease.tag_name];
+                }
+
+                return res.json({
+                    success: true,
+                    isGitMode: false,
+                    hasUpdate,
+                    currentVersion,
+                    latestVersion: latestTag,
+                    changelog
+                });
+            } catch (githubErr) {
+                // Trả về thông tin phiên bản hiện tại, báo lỗi kết nối GitHub check update
+                return res.json({
+                    success: true,
+                    isGitMode: false,
+                    hasUpdate: false,
+                    currentVersion,
+                    changelog: [`Cảnh báo: Không thể kiểm tra bản cập nhật mới từ GitHub (${githubErr.message})`]
+                });
+            }
         }
-
-        // Chạy git fetch để cập nhật danh sách commit mới từ origin
-        await ssh.executeCommand('cd /var/www/vps-manager && git fetch');
-
-        // Lấy hash commit hiện tại và hash remote
-        const localCommitRes = await ssh.executeCommand('cd /var/www/vps-manager && git rev-parse HEAD');
-        const remoteCommitRes = await ssh.executeCommand('cd /var/www/vps-manager && git rev-parse @{u}');
-        
-        const localCommit = localCommitRes.stdout.trim();
-        const remoteCommit = remoteCommitRes.stdout.trim();
-
-        // Lấy thông tin phiên bản hiện tại
-        const currentVersionRes = await ssh.executeCommand('cd /var/www/vps-manager && git log -1 --pretty=format:"%h (%cr) - %s"');
-        const currentVersion = currentVersionRes.stdout.trim();
-
-        const hasUpdate = localCommit !== remoteCommit;
-        
-        let changelog = [];
-        if (hasUpdate) {
-            // Lấy danh sách các commit mới ở remote chưa được pull về
-            const changelogRes = await ssh.executeCommand('cd /var/www/vps-manager && git log HEAD..@{u} --pretty=format:"%h - %s (%cr)"');
-            changelog = changelogRes.stdout.trim().split('\n').filter(Boolean);
-        }
-
-        res.json({
-            success: true,
-            hasUpdate,
-            localCommit,
-            remoteCommit,
-            currentVersion,
-            changelog
-        });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
