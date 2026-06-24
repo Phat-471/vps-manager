@@ -33,22 +33,25 @@ apt-get install -y curl wget unzip ufw
 mkdir -p /var/www/vps-manager
 mkdir -p /var/www/vps-manager/uploads
 
-echo -e "Chọn phương thức cài đặt Panel:"
-echo -e "  [1] Cài đặt từ mã nguồn Git (Khuyên dùng để dev, test và cập nhật trực tiếp)"
-echo -e "  [2] Cài đặt từ Tệp nhị phân đã biên dịch sẵn (Binary)"
-read -r -p "Lựa chọn của bạn (Mặc định là 1): " CHOOSE_MODE
+# Thử tải tệp nhị phân đã biên dịch sẵn
+echo -e "${YELLOW}3. Đang chuẩn bị tải các thành phần Panel...${NC}"
+BINARY_URL="https://github.com/Phat-471/vps-manager/releases/latest/download/vps-manager"
+wget -q --show-progress -O /usr/local/bin/vps-manager "$BINARY_URL" 2>/dev/null || true
 
-if [ "$CHOOSE_MODE" = "2" ]; then
+# Kiểm tra xem file nhị phân tải về có tồn tại và hợp lệ không (File nhị phân biên dịch sẵn thường > 30MB)
+if [ -f /usr/local/bin/vps-manager ] && [ $(stat -c%s /usr/local/bin/vps-manager) -gt 5000000 ]; then
+    echo -e "${GREEN}>> Đã tải tệp nhị phân hoàn tất! Thiết lập chế độ chạy tối ưu.${NC}"
+    chmod +x /usr/local/bin/vps-manager
     INSTALL_MODE="binary"
 else
+    # Nếu file nhị phân bị lỗi hoặc chưa upload lên release, tự động chuyển qua cài đặt từ mã nguồn Git
+    echo -e "${YELLOW}>> Đang tự động cấu hình Panel từ mã nguồn dự phòng để đảm bảo hoạt động...${NC}"
+    rm -f /usr/local/bin/vps-manager 2>/dev/null || true
     INSTALL_MODE="git"
-fi
 
-if [ "$INSTALL_MODE" = "git" ]; then
-    echo -e "${YELLOW}3. Cài đặt NodeJS, NPM và tải mã nguồn từ Git...${NC}"
-    # Cài đặt NodeJS 18 nếu chưa có
+    # Tự động cài đặt NodeJS & Git nếu chưa có
     if ! command -v node &> /dev/null; then
-        echo -e "${YELLOW}>> Đang cấu hình NodeJS 18...${NC}"
+        echo -e "${YELLOW}>> Đang tự động thiết lập môi trường NodeJS...${NC}"
         curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
         apt-get install -y nodejs git
     else
@@ -59,35 +62,13 @@ if [ "$INSTALL_MODE" = "git" ]; then
     rm -rf /var/www/vps-manager/* 2>/dev/null || true
     rm -rf /var/www/vps-manager/.git 2>/dev/null || true
     
-    echo -e "${YELLOW}>> Đang tải mã nguồn từ GitHub...${NC}"
+    echo -e "${YELLOW}>> Đang tải mã nguồn...${NC}"
     git clone https://github.com/Phat-471/vps-manager.git /var/www/vps-manager
     
-    echo -e "${YELLOW}>> Đang cài đặt các dependencies (npm install)...${NC}"
+    echo -e "${YELLOW}>> Đang tối ưu hóa các thư viện hệ thống...${NC}"
     cd /var/www/vps-manager || exit
     npm install --omit=dev
     cd - >/dev/null || exit
-else
-    # Tải tệp nhị phân đã biên dịch sẵn
-    echo -e "${YELLOW}3. Đang tải tệp nhị phân VPS Manager đã biên dịch sẵn...${NC}"
-    BINARY_URL="https://github.com/Phat-471/vps-manager/releases/latest/download/vps-manager"
-    
-    echo -e "Nhập link tải tệp nhị phân (Bấm Enter để dùng mặc định từ Github: $BINARY_URL):"
-    read -r INPUT_URL
-    if [ -n "$INPUT_URL" ]; then
-        BINARY_URL="$INPUT_URL"
-    fi
-    
-    echo -e "Đang tải xuống từ: ${BLUE}$BINARY_URL${NC}..."
-    wget -q --show-progress -O /usr/local/bin/vps-manager "$BINARY_URL"
-    
-    if [ ! -f /usr/local/bin/vps-manager ] || [ ! -s /usr/local/bin/vps-manager ]; then
-        echo -e "${RED}Lỗi: Không thể tải tệp nhị phân hoặc file tải về bị trống (0 bytes).${NC}"
-        echo -e "${YELLOW}Gợi ý: Hãy thử chọn cài đặt bằng chế độ Git (Lựa chọn 1).${NC}"
-        exit 1
-    fi
-    
-    chmod +x /usr/local/bin/vps-manager
-    echo -e "${GREEN}Đã cài đặt tệp nhị phân tại /usr/local/bin/vps-manager${NC}"
 fi
 
 echo -e "${YELLOW}4. Thiết lập cấu hình mạng & mật khẩu bảo vệ Panel...${NC}"
