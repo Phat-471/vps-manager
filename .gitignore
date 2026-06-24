@@ -25,3 +25,6 @@ logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Web dynamic data
+web/data/

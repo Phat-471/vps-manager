@@ -142,6 +142,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_submit'])) {
     }
 }
 
+// API công khai kiểm tra và kích hoạt License Key cho VPS
+if (isset($_GET['api']) && $_GET['api'] === 'verify_license' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    
+    $input = file_get_contents('php://input');
+    $payload = json_decode($input, true);
+    
+    if (!$payload || empty($payload['key']) || empty($payload['ip'])) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Dữ liệu không hợp lệ']);
+        exit;
+    }
+    
+    $key = trim($payload['key']);
+    $ip = trim($payload['ip']);
+    
+    $lic_file = $data_dir . '/licenses.json';
+    $licenses = [];
+    if (file_exists($lic_file)) {
+        $licenses = json_decode(file_get_contents($lic_file), true) ?: [];
+    }
+    
+    $found_index = -1;
+    foreach ($licenses as $idx => $lic) {
+        if ($lic['key'] === $key) {
+            $found_index = $idx;
+            break;
+        }
+    }
+    
+    if ($found_index === -1) {
+        echo json_encode(['success' => false, 'error' => 'Khóa bản quyền (License Key) không tồn tại trên hệ thống']);
+        exit;
+    }
+    
+    $license = $licenses[$found_index];
+    
+    if ($license['status'] === 'expired') {
+        echo json_encode(['success' => false, 'error' => 'Khóa bản quyền này đã hết hạn']);
+        exit;
+    }
+    if ($license['status'] === 'inactive') {
+        echo json_encode(['success' => false, 'error' => 'Khóa bản quyền đang bị khóa/chưa được kích hoạt']);
+        exit;
+    }
+    
+    if (!empty($license['expires_at']) && $license['expires_at'] !== 'never') {
+        if (strtotime($license['expires_at']) < time()) {
+            $licenses[$found_index]['status'] = 'expired';
+            file_put_contents($lic_file, json_encode($licenses, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            echo json_encode(['success' => false, 'error' => 'Khóa bản quyền này đã hết hạn']);
+            exit;
+        }
+    }
+    
+    if (!empty($license['vps_ip']) && $license['vps_ip'] !== $ip) {
+        echo json_encode(['success' => false, 'error' => 'Khóa bản quyền này đã được kích hoạt trên một IP khác: ' . $license['vps_ip']]);
+        exit;
+    }
+    
+    if (empty($license['vps_ip'])) {
+        $licenses[$found_index]['vps_ip'] = $ip;
+        $licenses[$found_index]['activated_at'] = date('Y-m-d H:i:s');
+        file_put_contents($lic_file, json_encode($licenses, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        log_activity('System', 'Kích hoạt License', "Kích hoạt Key: $key cho VPS IP: $ip");
+    }
+    
+    echo json_encode(['success' => true, 'message' => 'Bản quyền hợp lệ!']);
+    exit;
+}
+
 // Kiểm tra trạng thái xác thực để render view phù hợp
 $authenticated = $_SESSION['vps_authenticated'] ?? false;
 $role = $_SESSION['vps_role'] ?? 'none';
@@ -173,6 +244,131 @@ if (!empty($SECURITY_TOKEN) && $received_token === $SECURITY_TOKEN) {
 
 // Xử lý Yêu cầu AJAX (Nếu đã đăng nhập)
 if ($authenticated) {
+    // API lấy danh sách bản quyền
+    if (isset($_GET['api']) && $_GET['api'] === 'get_licenses') {
+        header('Content-Type: application/json');
+        $lic_file = $data_dir . '/licenses.json';
+        $licenses = [];
+        if (file_exists($lic_file)) {
+            $licenses = json_decode(file_get_contents($lic_file), true) ?: [];
+        }
+        echo json_encode($licenses);
+        exit;
+    }
+
+    // API sinh khóa bản quyền mới
+    if (isset($_GET['api']) && $_GET['api'] === 'generate_license' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        header('Content-Type: application/json');
+        if ($role !== 'admin') {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Không có quyền']);
+            exit;
+        }
+        
+        $input = file_get_contents('php://input');
+        $payload = json_decode($input, true);
+        $duration = $payload['duration'] ?? 'never';
+        
+        $key = 'VPS-LIC-' . strtoupper(bin2hex(random_bytes(8)));
+        
+        $expires_at = 'never';
+        if ($duration === '30d') {
+            $expires_at = date('Y-m-d H:i:s', strtotime('+30 days'));
+        } elseif ($duration === '365d') {
+            $expires_at = date('Y-m-d H:i:s', strtotime('+365 days'));
+        }
+        
+        $lic_file = $data_dir . '/licenses.json';
+        $licenses = [];
+        if (file_exists($lic_file)) {
+            $licenses = json_decode(file_get_contents($lic_file), true) ?: [];
+        }
+        
+        $new_lic = [
+            'id' => 'lic_' . time() . '_' . rand(100, 999),
+            'key' => $key,
+            'vps_ip' => '',
+            'status' => 'active',
+            'expires_at' => $expires_at,
+            'created_at' => date('Y-m-d H:i:s'),
+            'activated_at' => ''
+        ];
+        
+        array_unshift($licenses, $new_lic);
+        file_put_contents($lic_file, json_encode($licenses, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        log_activity($username, 'Tạo License', "Tạo License Key: $key thời hạn: $duration");
+        
+        echo json_encode(['success' => true, 'key' => $key]);
+        exit;
+    }
+
+    // Xóa License Key
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_delete_license']) && !empty($_POST['license_id'])) {
+        if ($role !== 'admin') {
+            die('Không có quyền thực hiện.');
+        }
+        $lic_id = $_POST['license_id'];
+        $lic_file = $data_dir . '/licenses.json';
+        if (file_exists($lic_file)) {
+            $list = json_decode(file_get_contents($lic_file), true) ?: [];
+            $new_list = [];
+            foreach ($list as $item) {
+                if ($item['id'] !== $lic_id) {
+                    $new_list[] = $item;
+                } else {
+                    log_activity($username, 'Xóa License', 'Xóa License Key: ' . $item['key']);
+                }
+            }
+            file_put_contents($lic_file, json_encode($new_list, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
+        header('Location: stats.php');
+        exit;
+    }
+
+    // API Lưu cấu hình hệ thống
+    if (isset($_GET['api']) && $_GET['api'] === 'save_system_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        header('Content-Type: application/json');
+        if ($role !== 'admin') {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Không có quyền']);
+            exit;
+        }
+        
+        $input = file_get_contents('php://input');
+        $payload = json_decode($input, true);
+        
+        if (!$payload || empty($payload['admin_user']) || empty($payload['security_token'])) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Dữ liệu cấu hình không hợp lệ']);
+            exit;
+        }
+        
+        $admin_u = trim($payload['admin_user']);
+        $admin_p = !empty($payload['admin_password']) ? trim($payload['admin_password']) : $ADMIN_PASSWORD;
+        $staff_u = trim($payload['staff_user'] ?? 'staff');
+        $staff_p = !empty($payload['staff_password']) ? trim($payload['staff_password']) : $STAFF_PASSWORD;
+        $sec_token = trim($payload['security_token']);
+        
+        $config_code = "<?php\n"
+                     . "/**\n"
+                     . " * CẤU HÌNH HỆ THỐNG TRUNG TÂM VPS MANAGER (Tự động cập nhật)\n"
+                     . " */\n\n"
+                     . "\$ADMIN_USER = " . var_export($admin_u, true) . ";\n"
+                     . "\$ADMIN_PASSWORD = " . var_export($admin_p, true) . ";\n\n"
+                     . "\$STAFF_USER = " . var_export($staff_u, true) . ";\n"
+                     . "\$STAFF_PASSWORD = " . var_export($staff_p, true) . ";\n\n"
+                     . "\$SECURITY_TOKEN = " . var_export($sec_token, true) . ";\n";
+                     
+        if (file_put_contents(__DIR__ . '/config.php', $config_code) !== false) {
+            log_activity($username, 'Cập nhật cấu hình', 'Cập nhật tài khoản quản trị và token bảo mật mới');
+            echo json_encode(['success' => true]);
+        } else {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => 'Không thể ghi đè file config.php. Vui lòng kiểm tra quyền ghi của thư mục.']);
+        }
+        exit;
+    }
+
     // API nhận báo cáo lỗi gửi từ VPS
     if (isset($_GET['api']) && $_GET['api'] === 'report_bug' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Content-Type: application/json');
@@ -471,6 +667,41 @@ foreach ($installations as $inst) {
             border-radius: 16px;
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
             transition: all 0.3s ease;
+        }
+
+        /* Main Navigation Tabs */
+        .nav-tabs-wrapper {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 28px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+            flex-wrap: wrap;
+        }
+        .nav-tab-main {
+            padding: 10px 18px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            cursor: pointer;
+            background: none;
+            border: 1px solid transparent;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .nav-tab-main:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.02);
+            border-color: var(--border-glass);
+        }
+        .nav-tab-main.active {
+            color: #fff;
+            background: rgba(99, 102, 241, 0.15);
+            border-color: rgba(99, 102, 241, 0.3);
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.1);
         }
 
         /* Lock Screen CSS */
@@ -1138,300 +1369,298 @@ foreach ($installations as $inst) {
             </div>
         </header>
 
-        <!-- KPI Grid Cards -->
-        <div class="stats-grid">
-            <div class="stat-card card-glass">
-                <div class="stat-icon" style="background: rgba(99, 102, 241, 0.1); color: var(--primary);">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+        <!-- Main Navigation Tabs -->
+        <div class="nav-tabs-wrapper">
+            <button class="nav-tab-main active" onclick="switchMainTab('vps-section')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+                Giám sát VPS
+            </button>
+            <button class="nav-tab-main" onclick="switchMainTab('bugs-section')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11.03V8.3c0-2.3-1.87-4.3-4.17-4.3H10.2C7.9 4 6 6 6 8.3v2.73c0 2.22 1.8 4.02 4.02 4.02h3.78c2.2 0 4.2-1.8 4.2-4.02z"></path><path d="M10 14.75v4.5c0 .4.3.75.75.75h2.5c.4 0 .75-.3.75-.75v-4.5"></path><path d="M6 10H3.5a1.5 1.5 0 0 1 0-3H6M18 10h2.5a1.5 1.5 0 0 0 0-3H18M6 13.5H3.5a1.5 1.5 0 0 1 0-3H6M18 13.5h2.5a1.5 1.5 0 0 0 0-3H18"></path></svg>
+                Báo cáo lỗi
+            </button>
+            <button class="nav-tab-main" onclick="switchMainTab('licenses-section')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                Quản lý Bản quyền
+            </button>
+            <button class="nav-tab-main" onclick="switchMainTab('settings-section')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                Cấu hình
+            </button>
+        </div>
+
+        <!-- 1. GIÁM SÁT VPS TAB -->
+        <div id="vps-section" class="tab-content">
+            <!-- Grid for KPIs and Overview Doughnut Chart -->
+            <div class="vps-overview-grid" style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 28px;">
+                <!-- KPI Grid Cards -->
+                <div class="stats-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 0; width: 100%;">
+                    <div class="stat-card card-glass">
+                        <div class="stat-icon" style="background: rgba(99, 102, 241, 0.1); color: var(--primary);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+                        </div>
+                        <div class="stat-details">
+                            <h4 id="kpi-total" class="kpi-val-animate"><?php echo $kpi['total']; ?></h4>
+                            <p>Tổng số VPS cài đặt</p>
+                        </div>
+                    </div>
+                    <div class="stat-card card-glass">
+                        <div class="stat-icon" style="background: var(--success-glow); color: var(--success);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        </div>
+                        <div class="stat-details">
+                            <h4 id="kpi-success" class="kpi-val-animate"><?php echo $kpi['success']; ?></h4>
+                            <p>Cài đặt thành công</p>
+                        </div>
+                    </div>
+                    <div class="stat-card card-glass">
+                        <div class="stat-icon" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                        </div>
+                        <div class="stat-details">
+                            <h4 id="kpi-installing" class="kpi-val-animate"><?php echo $kpi['installing']; ?></h4>
+                            <p>Đang tiến hành cài</p>
+                        </div>
+                    </div>
+                    <div class="stat-card card-glass">
+                        <div class="stat-icon" style="background: var(--danger-glow); color: var(--danger);">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                        </div>
+                        <div class="stat-details">
+                            <h4 id="kpi-failed" class="kpi-val-animate"><?php echo $kpi['failed']; ?></h4>
+                            <p>Cài đặt bị lỗi</p>
+                        </div>
+                    </div>
                 </div>
-                <div class="stat-details">
-                    <h4 id="kpi-total" class="kpi-val-animate"><?php echo $kpi['total']; ?></h4>
-                    <p>Tổng số VPS cài đặt</p>
+                <!-- Overview Doughnut Chart Card -->
+                <div class="card-glass" style="padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
+                    <h4 style="font-size: 13px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 12px; align-self: flex-start;">Trạng thái hệ thống</h4>
+                    <div style="position: relative; width: 140px; height: 140px;">
+                        <canvas id="overviewDoughnutChart"></canvas>
+                    </div>
                 </div>
             </div>
-            <div class="stat-card card-glass">
-                <div class="stat-icon" style="background: var(--success-glow); color: var(--success);">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                </div>
-                <div class="stat-details">
-                    <h4 id="kpi-success" class="kpi-val-animate"><?php echo $kpi['success']; ?></h4>
-                    <p>Cài đặt thành công</p>
-                </div>
-            </div>
-            <div class="stat-card card-glass">
-                <div class="stat-icon" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6;">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-                </div>
-                <div class="stat-details">
-                    <h4 id="kpi-installing" class="kpi-val-animate"><?php echo $kpi['installing']; ?></h4>
-                    <p>Đang tiến hành cài</p>
+
+            <!-- Command copy box -->
+            <div class="cmd-box card-glass">
+                <h4 class="cmd-title">Siêu liên kết cài đặt rút gọn nhanh cho VPS mới:</h4>
+                <div class="cmd-input-container">
+                    <?php
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https" : "http";
+                    $install_url = $protocol . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['REQUEST_URI']);
+                    $install_url = rtrim($install_url, '/\\');
+                    $cmd_line = "curl -sSL " . $install_url . " | bash";
+                    ?>
+                    <div class="cmd-code" id="cmd-text"><?php echo htmlspecialchars($cmd_line); ?></div>
+                    <button class="btn btn-primary" onclick="copyText('cmd-text', 'Đã copy lệnh cài đặt!')">Copy lệnh</button>
                 </div>
             </div>
-            <div class="stat-card card-glass">
-                <div class="stat-icon" style="background: var(--danger-glow); color: var(--danger);">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+
+            <div class="controls-row">
+                <div class="search-box-container">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" id="vps-search" class="input-glass search-input" placeholder="Tìm kiếm IP, Hệ điều hành, trạng thái...">
                 </div>
-                <div class="stat-details">
-                    <h4 id="kpi-failed" class="kpi-val-animate"><?php echo $kpi['failed']; ?></h4>
-                    <p>Cài đặt bị lỗi</p>
+                
+                <div class="filter-tabs">
+                    <button class="filter-tab active" data-filter="all">Tất cả</button>
+                    <button class="filter-tab" data-filter="online">Online</button>
+                    <button class="filter-tab" data-filter="installing">Đang cài</button>
+                    <button class="filter-tab" data-filter="failed">Lỗi cài đặt</button>
+                </div>
+
+                <div class="auto-refresh-container">
+                    <label class="switch">
+                        <input type="checkbox" id="auto-refresh-toggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>Tự động làm mới (10s)</span>
+                </div>
+            </div>
+
+            <!-- installations List Table -->
+            <div class="table-card card-glass">
+                <div class="table-header">
+                    <h3>Danh Sách Lịch Sử Cài Đặt VPS</h3>
+                    <span style="font-size: 11px; color: var(--text-secondary);">Nhấp vào IP bất kỳ để mở Biểu đồ giám sát tài nguyên</span>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>IP VPS</th>
+                                <th>Hệ điều hành</th>
+                                <th>Cổng</th>
+                                <th>Mật khẩu truy cập</th>
+                                <th>Trạng thái</th>
+                                <th>Ngày cập nhật</th>
+                                <th>Biểu đồ (24h)</th>
+                                <th>Hành động</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vps-table-body">
+                            <tr>
+                                <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 32px;">Đang tải danh sách VPS...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Pagination Controls -->
+                <div class="pagination-container">
+                    <div class="pagination-info">
+                        Hiển thị <span id="paginated-start">0</span> - <span id="paginated-end">0</span> trong tổng số <span id="paginated-total">0</span> máy chủ
+                    </div>
+                    <div class="pagination-controls-wrapper">
+                        <div class="items-per-page-container">
+                            <span>Số dòng hiển thị:</span>
+                            <select id="items-per-page-select" class="select-glass">
+                                <option value="5">5</option>
+                                <option value="10" selected>10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                        <div class="pagination-buttons" id="pagination-buttons-container">
+                            <!-- Sẽ được tạo động bằng JavaScript -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit log Section -->
+            <div class="card-glass audit-logs-card">
+                <h3 style="font-size: 15px; font-weight:600; display:flex; justify-content:space-between; align-items:center;">
+                    Nhật Ký Thao Tác Quản Trị Viên (Audit Logs)
+                    <button class="btn btn-glass" style="padding: 4px 10px; font-size:10px;" onclick="refreshAuditLogs()">Làm mới</button>
+                </h3>
+                <div class="audit-list" id="audit-logs-container">
+                    <div style="text-align: center; color: var(--text-secondary); font-size:12px; padding:20px;">Đang tải nhật ký...</div>
                 </div>
             </div>
         </div>
 
-        <!-- Command copy box -->
-        <div class="cmd-box card-glass">
-            <h4 class="cmd-title">Siêu liên kết cài đặt rút gọn nhanh cho VPS mới:</h4>
-            <div class="cmd-input-container">
-                <?php
-                $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' || $_SERVER['SERVER_PORT'] == 443) ? "https" : "http";
-                $install_url = $protocol . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['REQUEST_URI']);
-                $install_url = rtrim($install_url, '/\\');
-                $cmd_line = "curl -sSL " . $install_url . " | bash";
-                ?>
-                <div class="cmd-code" id="cmd-text"><?php echo htmlspecialchars($cmd_line); ?></div>
-                <button class="btn btn-primary" onclick="copyText('cmd-text', 'Đã copy lệnh cài đặt!')">Copy lệnh</button>
-            </div>
-        </div>
-
-        <!-- Search and Filter Controls -->
-        <style>
-            .controls-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                gap: 16px;
-                margin-bottom: 20px;
-                flex-wrap: wrap;
-            }
-            .search-box-container {
-                position: relative;
-                flex: 1;
-                min-width: 280px;
-            }
-            .search-box-container svg {
-                position: absolute;
-                left: 14px;
-                top: 50%;
-                transform: translateY(-50%);
-                color: var(--text-secondary);
-                pointer-events: none;
-            }
-            .search-input {
-                padding-left: 42px !important;
-            }
-            .filter-tabs {
-                display: flex;
-                background: rgba(255, 255, 255, 0.03);
-                border: 1px solid var(--border-glass);
-                padding: 4px;
-                border-radius: 10px;
-                gap: 4px;
-            }
-            .filter-tab {
-                padding: 6px 14px;
-                border-radius: 8px;
-                font-size: 13px;
-                font-weight: 500;
-                color: var(--text-secondary);
-                cursor: pointer;
-                transition: all 0.2s;
-                border: none;
-                background: none;
-            }
-            .filter-tab:hover {
-                color: var(--text-primary);
-                background: rgba(255, 255, 255, 0.02);
-            }
-            .filter-tab.active {
-                color: var(--text-primary);
-                background: rgba(99, 102, 241, 0.2);
-                border: 1px solid rgba(99, 102, 241, 0.3);
-            }
-            .online-dot {
-                width: 8px;
-                height: 8px;
-                border-radius: 50%;
-                display: inline-block;
-                margin-right: 6px;
-                vertical-align: middle;
-            }
-            .dot-online {
-                background-color: var(--success);
-                box-shadow: 0 0 8px var(--success);
-            }
-            .dot-offline {
-                background-color: #64748b;
-            }
-            .dot-installing {
-                background-color: #3b82f6;
-                animation: pulse-dot 1.2s infinite;
-            }
-            @keyframes pulse-dot {
-                0% { opacity: 0.5; transform: scale(0.9); }
-                50% { opacity: 1; transform: scale(1.1); }
-                100% { opacity: 0.5; transform: scale(0.9); }
-            }
-            .auto-refresh-container {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                font-size: 13px;
-                color: var(--text-secondary);
-            }
-            /* Switch styles */
-            .switch {
-                position: relative;
-                display: inline-block;
-                width: 38px;
-                height: 20px;
-            }
-            .switch input {
-                opacity: 0;
-                width: 0;
-                height: 0;
-            }
-            .slider {
-                position: absolute;
-                cursor: pointer;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background-color: rgba(255, 255, 255, 0.08);
-                transition: .3s;
-                border-radius: 20px;
-                border: 1px solid var(--border-glass);
-            }
-            .slider:before {
-                position: absolute;
-                content: "";
-                height: 12px;
-                width: 12px;
-                left: 3px;
-                bottom: 3px;
-                background-color: var(--text-secondary);
-                transition: .3s;
-                border-radius: 50%;
-            }
-            input:checked + .slider {
-                background-color: var(--primary);
-                border-color: rgba(99, 102, 241, 0.4);
-            }
-            input:checked + .slider:before {
-                transform: translateX(18px);
-                background-color: white;
-            }
-            .kpi-val-animate {
-                transition: all 0.3s ease;
-            }
-        </style>
-
-        <div class="controls-row">
-            <div class="search-box-container">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                <input type="text" id="vps-search" class="input-glass search-input" placeholder="Tìm kiếm IP, Hệ điều hành, trạng thái...">
-            </div>
-            
-            <div class="filter-tabs">
-                <button class="filter-tab active" data-filter="all">Tất cả</button>
-                <button class="filter-tab" data-filter="online">Online</button>
-                <button class="filter-tab" data-filter="installing">Đang cài</button>
-                <button class="filter-tab" data-filter="failed">Lỗi cài đặt</button>
-            </div>
-
-            <div class="auto-refresh-container">
-                <label class="switch">
-                    <input type="checkbox" id="auto-refresh-toggle" checked>
-                    <span class="slider"></span>
-                </label>
-                <span>Tự động làm mới (10s)</span>
-            </div>
-        </div>
-
-        <!-- installations List Table -->
-        <div class="table-card card-glass">
-            <div class="table-header">
-                <h3>Danh Sách Lịch Sử Cài Đặt VPS</h3>
-                <span style="font-size: 11px; color: var(--text-secondary);">Nhấp vào IP bất kỳ để mở Biểu đồ giám sát tài nguyên</span>
-            </div>
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>IP VPS</th>
-                            <th>Hệ điều hành</th>
-                            <th>Cổng</th>
-                            <th>Mật khẩu truy cập</th>
-                            <th>Trạng thái</th>
-                            <th>Ngày cập nhật</th>
-                            <th>Biểu đồ (24h)</th>
-                            <th>Hành động</th>
-                        </tr>
-                    </thead>
-                    <tbody id="vps-table-body">
-                        <tr>
-                            <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 32px;">Đang tải danh sách VPS...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <!-- Pagination Controls -->
-            <div class="pagination-container">
-                <div class="pagination-info">
-                    Hiển thị <span id="paginated-start">0</span> - <span id="paginated-end">0</span> trong tổng số <span id="paginated-total">0</span> máy chủ
+        <!-- 2. BÁO CÁO LỖI TAB -->
+        <div id="bugs-section" class="tab-content" style="display: none;">
+            <div class="table-card card-glass">
+                <div class="table-header">
+                    <h3>Báo Cáo Lỗi Cài Đặt VPS (Bug Reports)</h3>
+                    <span style="font-size: 11px; color: var(--text-secondary);">Danh sách nhật ký lỗi cài đặt được gửi về tự động từ các VPS</span>
                 </div>
-                <div class="pagination-controls-wrapper">
-                    <div class="items-per-page-container">
-                        <span>Số dòng hiển thị:</span>
-                        <select id="items-per-page-select" class="select-glass">
-                            <option value="5">5</option>
-                            <option value="10" selected>10</option>
-                            <option value="20">20</option>
-                            <option value="50">50</option>
-                            <option value="100">100</option>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Thời gian</th>
+                                <th>IP VPS</th>
+                                <th>Tác vụ</th>
+                                <th>Mô tả sự cố</th>
+                                <th>Hành động</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bug-table-body">
+                            <tr>
+                                <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">Đang tải danh sách báo cáo lỗi...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. QUẢN LÝ BẢN QUYỀN TAB -->
+        <div id="licenses-section" class="tab-content" style="display: none;">
+            <div class="table-card card-glass">
+                <div class="table-header">
+                    <h3>Quản Lý Khóa Bản Quyền (Licenses)</h3>
+                    <?php if ($role === 'admin'): ?>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select id="lic-duration-select" class="select-glass">
+                            <option value="30d">30 Ngày</option>
+                            <option value="365d">1 Năm (365 Ngày)</option>
+                            <option value="never" selected>Vô thời hạn (Never)</option>
                         </select>
+                        <button class="btn btn-primary" onclick="generateNewLicense()">Sinh Key Mới</button>
                     </div>
-                    <div class="pagination-buttons" id="pagination-buttons-container">
-                        <!-- Sẽ được tạo động bằng JavaScript -->
-                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Khóa bản quyền</th>
+                                <th>IP Kích hoạt</th>
+                                <th>Thời hạn</th>
+                                <th>Ngày tạo</th>
+                                <th>Kích hoạt lúc</th>
+                                <th>Trạng thái</th>
+                                <?php if ($role === 'admin'): ?>
+                                <th>Hành động</th>
+                                <?php endif; ?>
+                            </tr>
+                        </thead>
+                        <tbody id="licenses-table-body">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 32px;">Đang tải danh sách bản quyền...</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
 
-        <!-- Bug Reports Section -->
-        <div class="table-card card-glass" style="margin-top: 28px;">
-            <div class="table-header">
-                <h3>Báo Cáo Lỗi Cài Đặt VPS (Bug Reports)</h3>
-                <span style="font-size: 11px; color: var(--text-secondary);">Danh sách nhật ký lỗi cài đặt được gửi về tự động từ các VPS</span>
-            </div>
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Thời gian</th>
-                            <th>IP VPS</th>
-                            <th>Tác vụ</th>
-                            <th>Mô tả sự cố</th>
-                            <th>Hành động</th>
-                        </tr>
-                    </thead>
-                    <tbody id="bug-table-body">
-                        <tr>
-                            <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">Đang tải danh sách báo cáo lỗi...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Audit log Section -->
-        <div class="card-glass audit-logs-card">
-            <h3 style="font-size: 15px; font-weight:600; display:flex; justify-content:space-between; align-items:center;">
-                Nhật Ký Thao Tác Quản Trị Viên (Audit Logs)
-                <button class="btn btn-glass" style="padding: 4px 10px; font-size:10px;" onclick="refreshAuditLogs()">Làm mới</button>
-            </h3>
-            <div class="audit-list" id="audit-logs-container">
-                <div style="text-align: center; color: var(--text-secondary); font-size:12px; padding:20px;">Đang tải nhật ký...</div>
+        <!-- 4. CẤU HÌNH HỆ THỐNG TAB -->
+        <div id="settings-section" class="tab-content" style="display: none;">
+            <div class="card-glass" style="padding: 28px; max-width: 600px; margin: 0 auto;">
+                <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 20px; border-bottom: 1px solid var(--border-glass); padding-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    Thiết lập Cấu hình Hệ thống
+                </h3>
+                
+                <div id="settings-message" style="display: none; margin-bottom: 20px; padding: 12px; border-radius: 8px; font-size: 13px;"></div>
+                
+                <form id="settings-form" onsubmit="saveConfig(event)">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="cfg_admin_user">Tài khoản Admin</label>
+                            <input type="text" id="cfg_admin_user" required class="input-glass" value="<?php echo htmlspecialchars($ADMIN_USER); ?>" <?php echo $role !== 'admin' ? 'disabled' : ''; ?>>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="cfg_admin_password">Mật khẩu Admin</label>
+                            <input type="password" id="cfg_admin_password" class="input-glass" placeholder="Nhập mật khẩu mới..." <?php echo $role !== 'admin' ? 'disabled' : ''; ?>>
+                            <span style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: block;">Để trống nếu giữ nguyên</span>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="cfg_staff_user">Tài khoản Staff</label>
+                            <input type="text" id="cfg_staff_user" required class="input-glass" value="<?php echo htmlspecialchars($STAFF_USER); ?>" <?php echo $role !== 'admin' ? 'disabled' : ''; ?>>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="cfg_staff_password">Mật khẩu Staff</label>
+                            <input type="password" id="cfg_staff_password" class="input-glass" placeholder="Nhập mật khẩu mới..." <?php echo $role !== 'admin' ? 'disabled' : ''; ?>>
+                            <span style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: block;">Để trống nếu giữ nguyên</span>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 24px;">
+                        <label for="cfg_security_token">Security Token (VPS API Key)</label>
+                        <input type="text" id="cfg_security_token" required class="input-glass" value="<?php echo htmlspecialchars($SECURITY_TOKEN); ?>" <?php echo $role !== 'admin' ? 'disabled' : ''; ?>>
+                        <span style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: block;">Token bảo mật dùng cho liên lạc giữa script install/monitor và server này.</span>
+                    </div>
+                    
+                    <?php if ($role === 'admin'): ?>
+                    <button type="submit" class="btn btn-primary btn-block">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                        Lưu Cấu Hình
+                    </button>
+                    <?php else: ?>
+                    <div class="alert-error" style="background: rgba(245, 158, 11, 0.1); border-color: rgba(245, 158, 11, 0.2); color: var(--warning); margin-bottom: 0;">
+                        <span>Chỉ có tài khoản Administrator mới được thay đổi cấu hình hệ thống.</span>
+                    </div>
+                    <?php endif; ?>
+                </form>
             </div>
         </div>
     </div>
@@ -1515,11 +1744,235 @@ foreach ($installations as $inst) {
 
         let currentVPSData = [];
         let currentBugData = [];
+        let currentLicensesData = [];
         let currentFilter = 'all';
         let searchQuery = '';
         let refreshIntervalId = null;
         let currentPage = 1;
         let itemsPerPage = 10;
+        let overviewChartInstance = null;
+
+        // Switch main tabs
+        function switchMainTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+            document.getElementById(tabId).style.display = 'block';
+            
+            document.querySelectorAll('.nav-tab-main').forEach(el => el.classList.remove('active'));
+            const btnMap = {
+                'vps-section': 0,
+                'bugs-section': 1,
+                'licenses-section': 2,
+                'settings-section': 3
+            };
+            document.querySelectorAll('.nav-tab-main')[btnMap[tabId]].classList.add('active');
+            
+            if (tabId === 'licenses-section') {
+                loadLicenses();
+            } else if (tabId === 'bugs-section') {
+                loadBugReports();
+            }
+        }
+
+        // Initialize or update circular status overview chart
+        function initOrUpdateOverviewChart(data) {
+            let success = 0;
+            let installing = 0;
+            let failed = 0;
+
+            data.forEach(item => {
+                if (item.status === 'success') success++;
+                else if (item.status === 'installing') installing++;
+                else if (item.status === 'failed') failed++;
+            });
+
+            const ctx = document.getElementById('overviewDoughnutChart').getContext('2d');
+            if (overviewChartInstance) {
+                overviewChartInstance.data.datasets[0].data = [success, installing, failed];
+                overviewChartInstance.update();
+            } else {
+                overviewChartInstance = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Thành công', 'Đang cài', 'Lỗi'],
+                        datasets: [{
+                            data: [success, installing, failed],
+                            backgroundColor: ['#10b981', '#3b82f6', '#ef4444'],
+                            borderWidth: 1,
+                            borderColor: '#101426'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '70%',
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Load license keys
+        function loadLicenses() {
+            fetch('stats.php?api=get_licenses')
+                .then(res => res.json())
+                .then(data => {
+                    currentLicensesData = data;
+                    renderLicensesTable();
+                })
+                .catch(err => {
+                    console.error('Lỗi tải danh sách bản quyền: ', err);
+                    const tbody = document.getElementById('licenses-table-body');
+                    if (tbody) {
+                        tbody.innerHTML = `
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--danger); padding: 32px;">Lỗi tải dữ liệu bản quyền!</td>
+                            </tr>
+                        `;
+                    }
+                });
+        }
+
+        // Render license table
+        function renderLicensesTable() {
+            const tbody = document.getElementById('licenses-table-body');
+            if (!tbody) return;
+            
+            if (currentLicensesData.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 32px;">Chưa có khóa bản quyền nào được tạo.</td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            let html = '';
+            currentLicensesData.forEach(item => {
+                const userRole = '<?php echo $role; ?>';
+                let actionHtml = '';
+                if (userRole === 'admin') {
+                    actionHtml = `
+                        <form method="POST" onsubmit="return confirm('Bạn có chắc muốn xóa license key này không?')" style="display:inline-block;">
+                            <input type="hidden" name="license_id" value="${escapeHtml(item.id)}">
+                            <button type="submit" name="action_delete_license" class="btn btn-glass" style="padding: 4px 8px; font-size: 11px; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.15); color: #f87171;">
+                                Xóa
+                            </button>
+                        </form>
+                    `;
+                }
+                
+                let expiresDisplay = 'Vô thời hạn';
+                if (item.expires_at !== 'never' && item.expires_at) {
+                    expiresDisplay = escapeHtml(item.expires_at);
+                }
+                
+                let statusBadge = '';
+                if (item.status === 'active') {
+                    statusBadge = '<span class="badge badge-success">Sẵn sàng</span>';
+                } else if (item.status === 'expired') {
+                    statusBadge = '<span class="badge badge-failed">Hết hạn</span>';
+                } else {
+                    statusBadge = `<span class="badge badge-installing">${escapeHtml(item.status)}</span>`;
+                }
+                
+                html += `
+                    <tr>
+                        <td style="font-family: monospace; font-weight: 700; color: #a5b4fc;">${escapeHtml(item.key)}</td>
+                        <td style="color: #60a5fa; font-weight: 600;">${escapeHtml(item.vps_ip || 'Chưa kích hoạt')}</td>
+                        <td>${expiresDisplay}</td>
+                        <td style="font-size:12px; color: var(--text-secondary);">${escapeHtml(item.created_at)}</td>
+                        <td style="font-size:12px; color: var(--text-secondary);">${escapeHtml(item.activated_at || '--')}</td>
+                        <td>${statusBadge}</td>
+                        ${userRole === 'admin' ? `<td>${actionHtml}</td>` : ''}
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        // Generate license key
+        function generateNewLicense() {
+            const duration = document.getElementById('lic-duration-select').value;
+            fetch('stats.php?api=generate_license', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ duration: duration })
+            })
+            .then(res => res.json())
+            .then(res => {
+                if (res.success) {
+                    alert('Đã sinh key mới thành công: ' + res.key);
+                    loadLicenses();
+                    refreshAuditLogs();
+                } else {
+                    alert('Lỗi: ' + res.error);
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('Không thể kết nối đến API để sinh key mới.');
+            });
+        }
+
+        // Save system configuration via API
+        function saveConfig(event) {
+            event.preventDefault();
+            const adminUser = document.getElementById('cfg_admin_user').value;
+            const adminPassword = document.getElementById('cfg_admin_password').value;
+            const staffUser = document.getElementById('cfg_staff_user').value;
+            const staffPassword = document.getElementById('cfg_staff_password').value;
+            const securityToken = document.getElementById('cfg_security_token').value;
+            
+            const msgEl = document.getElementById('settings-message');
+            msgEl.style.display = 'none';
+            
+            fetch('stats.php?api=save_system_config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    admin_user: adminUser,
+                    admin_password: adminPassword,
+                    staff_user: staffUser,
+                    staff_password: staffPassword,
+                    security_token: securityToken
+                })
+            })
+            .then(res => res.json())
+            .then(res => {
+                if (res.success) {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = 'rgba(16, 185, 129, 0.1)';
+                    msgEl.style.border = '1px solid rgba(16, 185, 129, 0.2)';
+                    msgEl.style.color = '#34d399';
+                    msgEl.innerText = 'Đã lưu cấu hình mới thành công! Hệ thống sẽ sử dụng tài khoản/token mới ngay lập tức.';
+                    document.getElementById('cfg_admin_password').value = '';
+                    document.getElementById('cfg_staff_password').value = '';
+                    refreshAuditLogs();
+                } else {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = 'rgba(239, 68, 68, 0.1)';
+                    msgEl.style.border = '1px solid rgba(239, 68, 68, 0.2)';
+                    msgEl.style.color = '#f87171';
+                    msgEl.innerText = 'Lỗi: ' + res.error;
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                msgEl.style.display = 'block';
+                msgEl.style.background = 'rgba(239, 68, 68, 0.1)';
+                msgEl.style.border = '1px solid rgba(239, 68, 68, 0.2)';
+                msgEl.style.color = '#f87171';
+                msgEl.innerText = 'Không thể kết nối đến máy chủ để lưu cấu hình.';
+            });
+        }
 
         // Tải danh sách báo cáo lỗi từ máy chủ trung tâm
         function loadBugReports() {
@@ -1615,6 +2068,7 @@ foreach ($installations as $inst) {
                     currentVPSData = data;
                     renderVPSTable();
                     updateKPICards(data);
+                    initOrUpdateOverviewChart(data);
                 })
                 .catch(err => {
                     console.error('Lỗi tải danh sách VPS: ', err);

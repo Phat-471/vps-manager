@@ -77,6 +77,41 @@ if [ -z "$OS_VERSION" ]; then
   OS_VERSION="Linux OS"
 fi
 
+echo -e "${YELLOW}==================================================${NC}"
+echo -e "${YELLOW}           XÁC MINH BẢN QUYỀN (LICENSE)           ${NC}"
+echo -e "${YELLOW}==================================================${NC}"
+echo -n "Vui lòng nhập License Key của bạn: "
+if [ -t 0 ]; then
+  read -r LICENSE_KEY
+elif [ -c /dev/tty ]; then
+  read -r LICENSE_KEY </dev/tty
+else
+  LICENSE_KEY=""
+fi
+
+if [ -z "$LICENSE_KEY" ]; then
+  echo -e "${RED}Lỗi: Không tìm thấy License Key. Trình cài đặt dừng lại.${NC}"
+  exit 1
+fi
+
+echo -e "${BLUE}Đang xác minh bản quyền với server trung tâm...${NC}"
+# Gọi API verify_license
+VERIFY_RESPONSE=$(curl -k -s -X POST "$PANEL_URL/stats.php?api=verify_license" \
+  -H "Content-Type: application/json" \
+  -d "{\"key\":\"$LICENSE_KEY\",\"ip\":\"$IP_VPS\"}")
+
+SUCCESS_STATUS=$(echo "$VERIFY_RESPONSE" | grep -o '"success":true')
+if [ -z "$SUCCESS_STATUS" ]; then
+  ERROR_MSG=$(echo "$VERIFY_RESPONSE" | grep -o '"error":"[^"]*' | cut -d'"' -f4)
+  if [ -z "$ERROR_MSG" ]; then
+    ERROR_MSG="License Key không hợp lệ hoặc máy chủ từ chối kết nối."
+  fi
+  echo -e "${RED}Lỗi xác minh: $ERROR_MSG${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}Xác minh bản quyền thành công!${NC}"
+
 # Hàm gửi báo cáo trạng thái về máy chủ trung tâm
 report_status() {
     local status="$1"
