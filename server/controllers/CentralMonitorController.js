@@ -205,25 +205,50 @@ async function deleteRecord(req, res) {
 }
 
 /**
+ * Hàm lọc sạch các thông tin nhạy cảm trong logs (mật khẩu, database user, salts, keys)
+ */
+function sanitizeLogs(logText) {
+    if (!logText) return '';
+    let sanitized = logText;
+
+    // Lọc các chuỗi định dạng mật khẩu phổ biến
+    // Ví dụ: db_password = 'xxx', adminPass: 'xxx', password=xxx
+    const passwordPatterns = [
+        /(password|passwd|pass|pwd|db_pass|db_password|admin_pass|admin_password|pma_password|pma_pass|key|token|auth_key|secure_token|salts|secret)([\s]*[=:][\s]*['"]?)([^\s'"]{4,})/gi,
+        /(-p\s+)([^\s]+)/gi  // Lọc tham số mật khẩu dòng lệnh (như mysql -pPassword)
+    ];
+
+    passwordPatterns.forEach(pattern => {
+        sanitized = sanitized.replace(pattern, '$1$2[REDACTED_SECURE_DATA]');
+    });
+
+    return sanitized;
+}
+
+/**
  * Gửi báo cáo lỗi về máy chủ trung tâm
  */
 async function reportBug(req, res) {
     try {
-        const { vpsConfig, task, logs, details } = req.body;
+        const { vpsIp, task, logs, details } = req.body;
         const config = readConfig();
         
         if (!config.url) {
             return res.status(400).json({ success: false, error: 'Chưa cấu hình máy chủ trung tâm để gửi báo cáo lỗi tự động.' });
         }
 
-        const ip = vpsConfig?.host || 'localhost';
+        const ip = vpsIp || 'localhost';
         const targetUrl = `${config.url}/stats.php?api=report_bug`;
         
+        // Tiến hành lọc sạch log trước khi truyền tải
+        const safeLogs = sanitizeLogs(logs);
+        const safeDetails = sanitizeLogs(details);
+
         const payload = {
             ip,
             task: task || 'N/A',
-            logs: logs || '',
-            details: details || '',
+            logs: safeLogs,
+            details: safeDetails,
             timestamp: new Date().toISOString()
         };
 

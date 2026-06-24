@@ -195,7 +195,7 @@ ${logs}
     setReporting(true);
     try {
       const res = await apiCall('/api/central-monitor/report-bug', 'POST', {
-        vpsConfig: currentVPS,
+        vpsIp: currentVPS?.host || 'localhost',
         task: `Cài đặt ${activeTab.toUpperCase()}`,
         logs: logs,
         details: `Lỗi cài đặt ${activeTab} trên domain ${domain || 'N/A'}, port ${port || pmaPort || 'N/A'}`
