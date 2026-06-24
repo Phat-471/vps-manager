@@ -44,6 +44,14 @@ function log_activity($username, $action, $details) {
     file_put_contents($audit_file, json_encode($logs, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 }
 
+// Hàm phụ kiểm tra mật khẩu hỗ trợ cả mã hóa Bcrypt lẫn chuỗi văn bản trần
+function verify_user_password($input_pwd, $stored_pwd) {
+    if (strpos($stored_pwd, '$2y$') === 0) {
+        return password_verify($input_pwd, $stored_pwd);
+    }
+    return $input_pwd === $stored_pwd;
+}
+
 // Xử lý Đăng xuất
 if (isset($_GET['action']) && $_GET['action'] === 'logout') {
     $user = $_SESSION['vps_user'] ?? 'Ẩn danh';
@@ -91,13 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_submit'])) {
         $role_assigned = '';
         $user_display_name = '';
         
-        // Hàm phụ kiểm tra mật khẩu hỗ trợ cả mã hóa Bcrypt lẫn chuỗi văn bản trần
-        function verify_user_password($input_pwd, $stored_pwd) {
-            if (strpos($stored_pwd, '$2y$') === 0) {
-                return password_verify($input_pwd, $stored_pwd);
-            }
-            return $input_pwd === $stored_pwd;
-        }
+        // Xác minh thông tin tài khoản đăng nhập
 
         if ($username_input === $ADMIN_USER && verify_user_password($password_input, $ADMIN_PASSWORD)) {
             $authenticated_user = true;
