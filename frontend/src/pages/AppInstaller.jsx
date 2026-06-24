@@ -23,6 +23,7 @@ export default function AppInstaller() {
   const [activeTab, setActiveTab] = useState('wordpress'); // 'wordpress' | 'laravel' | 'phpmyadmin' | 'portainer' | 'nodeapp'
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
+  const [installFailed, setInstallFailed] = useState(false);
   
   // Form Inputs
   const [domain, setDomain] = useState('');
@@ -126,6 +127,7 @@ export default function AppInstaller() {
       setLoading(false);
       setRunning(false);
       if (code === 0) {
+        setInstallFailed(false);
         setLogs(prev => prev + `\n>> [${new Date().toLocaleTimeString()}] THÀNH CÔNG: Quá trình cài đặt ứng dụng đã hoàn tất!\n`);
         setInstalledData(preparedDataRef.current);
         showToast('Cài đặt ứng dụng thành công!', 'success');
@@ -134,6 +136,7 @@ export default function AppInstaller() {
           setShowPmaForm(false);
         }
       } else {
+        setInstallFailed(true);
         const errMsg = error || `Mã lỗi trả về: ${code}`;
         setLogs(prev => prev + `\n>> [${new Date().toLocaleTimeString()}] THẤT BẠI: ${errMsg}\n`);
         showToast('Cài đặt ứng dụng thất bại: ' + errMsg, 'error');
@@ -149,6 +152,44 @@ export default function AppInstaller() {
     };
   }, [socket, activeTab, currentVPS]);
 
+  const handleCopyErrorReport = () => {
+    const reportText = `=== BÁO CÁO LỖI CÀI ĐẶT VPS MANAGER ===
+Thời gian: ${new Date().toLocaleString()}
+VPS IP/Host: ${currentVPS?.host || 'N/A'}
+Tác vụ: Cài đặt ${activeTab.toUpperCase()}
+Tên miền: ${domain || 'N/A'}
+Cổng: ${port || pmaPort || 'N/A'}
+
+--- NHẬT KÝ CHI TIẾT (LOGS) ---
+${logs}
+======================================`;
+    navigator.clipboard.writeText(reportText);
+    showToast('Đã sao chép báo cáo lỗi! Hãy gửi nội dung này cho kỹ thuật viên qua Zalo/Telegram.', 'success');
+  };
+
+  const handleDownloadLog = () => {
+    const reportText = `=== BÁO CÁO LỖI CÀI ĐẶT VPS MANAGER ===
+Thời gian: ${new Date().toLocaleString()}
+VPS IP/Host: ${currentVPS?.host || 'N/A'}
+Tác vụ: Cài đặt ${activeTab.toUpperCase()}
+Tên miền: ${domain || 'N/A'}
+Cổng: ${port || pmaPort || 'N/A'}
+
+--- NHẬT KÝ CHI TIẾT (LOGS) ---
+${logs}
+======================================`;
+    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `error_report_${activeTab}_${Date.now()}.log`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast('Đã tải xuống file log thành công!', 'success');
+  };
+
   const handleTabChange = (tab) => {
     if (running) {
       if (!window.confirm('Tiến trình cài đặt hiện tại đang chạy. Thay đổi tab sẽ không dừng tiến trình. Bạn có chắc chắn?')) {
@@ -156,6 +197,7 @@ export default function AppInstaller() {
       }
     }
     setActiveTab(tab);
+    setInstallFailed(false);
     setInstalledData(null);
     setLogs('');
     setDomain('');
@@ -192,6 +234,7 @@ export default function AppInstaller() {
 
     setLoading(true);
     setRunning(true);
+    setInstallFailed(false);
     setInstalledData(null);
     setLogs(`>> [${new Date().toLocaleTimeString()}] Đang chuẩn bị kịch bản cài đặt cho ${activeTab.toUpperCase()}...\n`);
 
@@ -1121,10 +1164,40 @@ export default function AppInstaller() {
           <pre 
             ref={logEndRef}
             className="flex-1 bg-black/60 text-green-400 p-4 font-mono text-xs overflow-y-auto whitespace-pre-wrap rounded-lg border border-white/5"
-            style={{ maxHeight: '420px' }}
+            style={{ maxHeight: '350px' }}
           >
             {logs || '>> Sẵn sàng. Nhập thông tin cấu hình và nhấn nút cài đặt...'}
           </pre>
+
+          {installFailed && (
+            <div className="mt-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg space-y-2 animate-fade-in">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={16} className="text-red-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h4 className="text-xs font-bold text-red-400">Cài đặt thất bại!</h4>
+                  <p className="text-[11px] text-gray-400">
+                    Đã xảy ra sự cố trong quá trình cài đặt. Bạn có thể sao chép báo cáo lỗi hoặc tải file log để gửi cho bộ phận kỹ thuật hỗ trợ khắc phục.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={handleCopyErrorReport}
+                  className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-xs font-semibold rounded flex items-center gap-1.5 transition-colors"
+                >
+                  <Copy size={13} />
+                  Sao chép báo cáo lỗi
+                </button>
+                <button
+                  onClick={handleDownloadLog}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-semibold rounded flex items-center gap-1.5 transition-colors"
+                >
+                  <Terminal size={13} />
+                  Tải file Log lỗi
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
