@@ -204,10 +204,69 @@ async function deleteRecord(req, res) {
     }
 }
 
+/**
+ * Gửi báo cáo lỗi về máy chủ trung tâm
+ */
+async function reportBug(req, res) {
+    try {
+        const { vpsConfig, task, logs, details } = req.body;
+        const config = readConfig();
+        
+        if (!config.url) {
+            return res.status(400).json({ success: false, error: 'Chưa cấu hình máy chủ trung tâm để gửi báo cáo lỗi tự động.' });
+        }
+
+        const ip = vpsConfig?.host || 'localhost';
+        const targetUrl = `${config.url}/stats.php?api=report_bug`;
+        
+        const payload = {
+            ip,
+            task: task || 'N/A',
+            logs: logs || '',
+            details: details || '',
+            timestamp: new Date().toISOString()
+        };
+
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (config.token) {
+            headers['X-Secure-Token'] = config.token;
+        }
+
+        const response = await fetch(targetUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            return res.status(response.status).json({
+                success: false,
+                error: `Máy chủ trung tâm trả về lỗi ${response.status}`,
+                details: errText
+            });
+        }
+
+        let data = { success: true };
+        try {
+            data = await response.json();
+        } catch (e) {
+            // Trường hợp máy chủ trung tâm không trả về JSON hợp lệ
+        }
+
+        res.json({ success: true, message: 'Gửi báo cáo lỗi thành công!', data });
+    } catch (err) {
+        res.status(500).json({ success: false, error: 'Không thể kết nối đến máy chủ trung tâm để gửi báo cáo', details: err.message });
+    }
+}
+
 module.exports = {
     getConfig,
     saveConfig,
     getList,
     getStats,
-    deleteRecord
+    deleteRecord,
+    reportBug
 };

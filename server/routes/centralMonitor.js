@@ -17,4 +17,7 @@ router.get('/stats', CentralMonitorController.getStats);
 // Xóa bản ghi cài đặt VPS
 router.post('/delete', CentralMonitorController.deleteRecord);
 
+// Gửi báo cáo lỗi về máy chủ trung tâm
+router.post('/report-bug', CentralMonitorController.reportBug);
+
 module.exports = router;

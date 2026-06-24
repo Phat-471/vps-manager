@@ -24,6 +24,7 @@ export default function AppInstaller() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [installFailed, setInstallFailed] = useState(false);
+  const [reporting, setReporting] = useState(false);
   
   // Form Inputs
   const [domain, setDomain] = useState('');
@@ -188,6 +189,27 @@ ${logs}
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     showToast('Đã tải xuống file log thành công!', 'success');
+  };
+
+  const handleSendOnlineReport = async () => {
+    setReporting(true);
+    try {
+      const res = await apiCall('/api/central-monitor/report-bug', 'POST', {
+        vpsConfig: currentVPS,
+        task: `Cài đặt ${activeTab.toUpperCase()}`,
+        logs: logs,
+        details: `Lỗi cài đặt ${activeTab} trên domain ${domain || 'N/A'}, port ${port || pmaPort || 'N/A'}`
+      });
+      if (res.success) {
+        showToast('Đã gửi báo cáo lỗi tự động về máy chủ trung tâm thành công!', 'success');
+      }
+    } catch (err) {
+      const errMsg = err.response?.data?.error || err.message;
+      showToast('Gửi báo cáo tự động thất bại: ' + errMsg + '. Đang chuyển sang chế độ sao chép thủ công...', 'error');
+      handleCopyErrorReport();
+    } finally {
+      setReporting(false);
+    }
   };
 
   const handleTabChange = (tab) => {
@@ -1180,7 +1202,24 @@ ${logs}
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2 pt-1">
+              <div className="flex gap-2 pt-1 flex-wrap">
+                <button
+                  onClick={handleSendOnlineReport}
+                  disabled={reporting}
+                  className="px-3 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-200 text-xs font-semibold rounded flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                >
+                  {reporting ? (
+                    <>
+                      <Loader size={13} className="animate-spin" />
+                      Đang gửi...
+                    </>
+                  ) : (
+                    <>
+                      <Rocket size={13} />
+                      Gửi báo cáo lỗi trực tuyến
+                    </>
+                  )}
+                </button>
                 <button
                   onClick={handleCopyErrorReport}
                   className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-200 text-xs font-semibold rounded flex items-center gap-1.5 transition-colors"
