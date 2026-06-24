@@ -171,6 +171,79 @@ if (!empty($SECURITY_TOKEN) && $received_token === $SECURITY_TOKEN) {
 
 // Xử lý Yêu cầu AJAX (Nếu đã đăng nhập)
 if ($authenticated) {
+    // API nhận báo cáo lỗi gửi từ VPS
+    if (isset($_GET['api']) && $_GET['api'] === 'report_bug' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        header('Content-Type: application/json');
+        
+        $input = file_get_contents('php://input');
+        $payload = json_decode($input, true);
+        
+        if (!$payload || empty($payload['ip']) || empty($payload['logs'])) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Dữ liệu không hợp lệ']);
+            exit;
+        }
+        
+        $bug_file = $data_dir . '/bug_reports.json';
+        $bug_reports = [];
+        if (file_exists($bug_file)) {
+            $bug_reports = json_decode(file_get_contents($bug_file), true) ?: [];
+        }
+        
+        $new_bug = [
+            'id' => 'bug_' . time() . '_' . rand(100, 999),
+            'timestamp' => date('Y-m-d H:i:s'),
+            'ip' => $payload['ip'],
+            'task' => $payload['task'] ?? 'N/A',
+            'details' => $payload['details'] ?? '',
+            'logs' => $payload['logs']
+        ];
+        
+        array_unshift($bug_reports, $new_bug);
+        if (count($bug_reports) > 100) {
+            $bug_reports = array_slice($bug_reports, 0, 100);
+        }
+        
+        file_put_contents($bug_file, json_encode($bug_reports, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        
+        echo json_encode(['success' => true]);
+        exit;
+    }
+
+    // API lấy danh sách báo cáo lỗi
+    if (isset($_GET['api']) && $_GET['api'] === 'get_bug_reports') {
+        header('Content-Type: application/json');
+        $bug_file = $data_dir . '/bug_reports.json';
+        $bug_reports = [];
+        if (file_exists($bug_file)) {
+            $bug_reports = json_decode(file_get_contents($bug_file), true) ?: [];
+        }
+        echo json_encode($bug_reports);
+        exit;
+    }
+
+    // API xóa báo cáo lỗi
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action_delete_bug']) && !empty($_POST['bug_id'])) {
+        if ($role !== 'admin') {
+            die('Không có quyền thực hiện.');
+        }
+        $bug_id = $_POST['bug_id'];
+        $bug_file = $data_dir . '/bug_reports.json';
+        if (file_exists($bug_file)) {
+            $list = json_decode(file_get_contents($bug_file), true) ?: [];
+            $new_list = [];
+            foreach ($list as $item) {
+                if ($item['id'] !== $bug_id) {
+                    $new_list[] = $item;
+                }
+            }
+            file_put_contents($bug_file, json_encode($new_list, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            log_activity($username, 'Xóa Báo cáo lỗi', 'Xóa báo cáo lỗi ID: ' . $bug_id);
+        }
+        header('Location: stats.php');
+        exit;
+    }
+
     // 1. Xem nhật ký thao tác
     if (isset($_GET['api']) && $_GET['api'] === 'audit') {
         header('Content-Type: application/json');
@@ -1323,6 +1396,32 @@ foreach ($installations as $inst) {
             </div>
         </div>
 
+        <!-- Bug Reports Section -->
+        <div class="table-card card-glass" style="margin-top: 28px;">
+            <div class="table-header">
+                <h3>Báo Cáo Lỗi Cài Đặt VPS (Bug Reports)</h3>
+                <span style="font-size: 11px; color: var(--text-secondary);">Danh sách nhật ký lỗi cài đặt được gửi về tự động từ các VPS</span>
+            </div>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Thời gian</th>
+                            <th>IP VPS</th>
+                            <th>Tác vụ</th>
+                            <th>Mô tả sự cố</th>
+                            <th>Hành động</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bug-table-body">
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">Đang tải danh sách báo cáo lỗi...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Audit log Section -->
         <div class="card-glass audit-logs-card">
             <h3 style="font-size: 15px; font-weight:600; display:flex; justify-content:space-between; align-items:center;">
@@ -1377,6 +1476,29 @@ foreach ($installations as $inst) {
         </div>
     </div>
 
+    <!-- BUG DETAIL MODAL -->
+    <div class="modal-overlay" id="bug-detail-modal">
+        <div class="modal-card card-glass animate-fade-in" style="max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; padding: 24px;">
+            <div class="modal-header-flex" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px; margin-bottom: 16px;">
+                <div>
+                    <h2 id="modal-bug-title" style="font-size:18px; font-weight:700; color: var(--danger);">Chi tiết báo cáo lỗi</h2>
+                    <p id="modal-bug-subtitle" style="font-size:12px; color: var(--text-secondary); margin-top:2px;">Thời gian | IP: 0.0.0.0</p>
+                </div>
+                <button class="modal-close" onclick="closeBugDetailModal()">×</button>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; gap: 12px;">
+                <div id="modal-bug-details" style="font-size: 13px; color: var(--text-primary); padding: 10px; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px solid var(--border-glass);">
+                    Chi tiết lỗi...
+                </div>
+                <pre id="modal-bug-logs" style="flex: 1; background: rgba(0,0,0,0.5); color: #f87171; padding: 14px; font-family: monospace; font-size: 12px; overflow-y: auto; white-space: pre-wrap; padding: 12px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.2);"></pre>
+            </div>
+            <div style="display: flex; gap: 12px; margin-top: 16px; border-top: 1px solid var(--border-glass); padding-top: 12px; justify-content: flex-end;">
+                <button class="btn btn-primary" onclick="copyBugLogsDirect()">Sao chép log</button>
+                <button class="btn btn-glass" onclick="closeBugDetailModal()">Đóng</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Copy text helper
         function copyText(elementId, toastMsg) {
@@ -1390,11 +1512,98 @@ foreach ($installations as $inst) {
         }
 
         let currentVPSData = [];
+        let currentBugData = [];
         let currentFilter = 'all';
         let searchQuery = '';
         let refreshIntervalId = null;
         let currentPage = 1;
         let itemsPerPage = 10;
+
+        // Tải danh sách báo cáo lỗi từ máy chủ trung tâm
+        function loadBugReports() {
+            fetch('stats.php?api=get_bug_reports')
+                .then(res => res.json())
+                .then(data => {
+                    currentBugData = data;
+                    renderBugTable();
+                })
+                .catch(err => {
+                    console.error('Lỗi tải danh sách bug report: ', err);
+                    document.getElementById('bug-table-body').innerHTML = `
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: var(--danger); padding: 32px;">Lỗi tải dữ liệu báo cáo lỗi!</td>
+                        </tr>
+                    `;
+                });
+        }
+
+        // Render bảng dữ liệu báo cáo lỗi
+        function renderBugTable() {
+            const tbody = document.getElementById('bug-table-body');
+            if (currentBugData.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">Chưa nhận được báo cáo lỗi nào từ VPS khách hàng.</td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            let html = '';
+            currentBugData.forEach(item => {
+                const userRole = '<?php echo $role; ?>';
+                let actionHtml = `
+                    <button class="btn btn-glass" style="padding: 4px 8px; font-size: 11px; display: inline-flex;" onclick="openBugDetailModal('${item.id}')">
+                        Xem chi tiết
+                    </button>
+                `;
+                if (userRole === 'admin') {
+                    actionHtml += `
+                        <form method="POST" onsubmit="return confirm('Bạn có chắc muốn xóa báo cáo lỗi này không?')" style="display:inline-block;">
+                            <input type="hidden" name="bug_id" value="${escapeHtml(item.id)}">
+                            <button type="submit" name="action_delete_bug" class="btn btn-glass" style="padding: 4px 8px; font-size: 11px; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.15); color: #f87171;">
+                                Xóa
+                            </button>
+                        </form>
+                    `;
+                }
+                
+                html += `
+                    <tr>
+                        <td style="color: var(--text-secondary); font-size: 12px;">${escapeHtml(item.timestamp)}</td>
+                        <td style="color: #60a5fa; font-weight: 600;">${escapeHtml(item.ip)}</td>
+                        <td><span class="badge badge-failed">${escapeHtml(item.task)}</span></td>
+                        <td style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-secondary);">${escapeHtml(item.details)}</td>
+                        <td><div class="action-cell">${actionHtml}</div></td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        let activeBugLogs = '';
+        function openBugDetailModal(id) {
+            const bug = currentBugData.find(b => b.id === id);
+            if (!bug) return;
+            
+            activeBugLogs = bug.logs;
+            document.getElementById('modal-bug-subtitle').innerText = `${bug.timestamp} | IP: ${bug.ip}`;
+            document.getElementById('modal-bug-details').innerText = bug.details || 'Không có mô tả chi tiết';
+            document.getElementById('modal-bug-logs').textContent = bug.logs || 'Không có dữ liệu logs';
+            document.getElementById('bug-detail-modal').style.display = 'flex';
+        }
+
+        function closeBugDetailModal() {
+            document.getElementById('bug-detail-modal').style.display = 'none';
+        }
+
+        function copyBugLogsDirect() {
+            navigator.clipboard.writeText(activeBugLogs).then(() => {
+                alert('Đã copy logs lỗi vào Clipboard!');
+            }).catch(err => {
+                console.error('Không thể copy: ', err);
+            });
+        }
 
         // Tải danh sách VPS và hiển thị
         function loadVPSList() {
@@ -1863,6 +2072,7 @@ foreach ($installations as $inst) {
         document.addEventListener('DOMContentLoaded', () => {
             // Tải dữ liệu ban đầu
             loadVPSList();
+            loadBugReports();
             refreshAuditLogs();
 
             // Xử lý Tìm kiếm
@@ -1904,6 +2114,7 @@ foreach ($installations as $inst) {
                 if (refreshIntervalId) clearInterval(refreshIntervalId);
                 refreshIntervalId = setInterval(() => {
                     loadVPSList();
+                    loadBugReports();
                 }, 10000); // 10 giây
             }
 
