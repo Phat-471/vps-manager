@@ -33,26 +33,62 @@ apt-get install -y curl wget unzip ufw
 mkdir -p /var/www/vps-manager
 mkdir -p /var/www/vps-manager/uploads
 
-# Tải tệp nhị phân đã biên dịch sẵn
-echo -e "${YELLOW}3. Đang tải tệp nhị phân VPS Manager đã biên dịch sẵn...${NC}"
-BINARY_URL="https://github.com/Phat-471/vps-manager/releases/latest/download/vps-manager"
+echo -e "Chọn phương thức cài đặt Panel:"
+echo -e "  [1] Cài đặt từ mã nguồn Git (Khuyên dùng để dev, test và cập nhật trực tiếp)"
+echo -e "  [2] Cài đặt từ Tệp nhị phân đã biên dịch sẵn (Binary)"
+read -r -p "Lựa chọn của bạn (Mặc định là 1): " CHOOSE_MODE
 
-echo -e "Nhập link tải tệp nhị phân (Bấm Enter để dùng mặc định từ Github: $BINARY_URL):"
-read -r INPUT_URL
-if [ -n "$INPUT_URL" ]; then
-    BINARY_URL="$INPUT_URL"
+if [ "$CHOOSE_MODE" = "2" ]; then
+    INSTALL_MODE="binary"
+else
+    INSTALL_MODE="git"
 fi
 
-echo -e "Đang tải xuống từ: ${BLUE}$BINARY_URL${NC}..."
-wget -q --show-progress -O /usr/local/bin/vps-manager "$BINARY_URL"
+if [ "$INSTALL_MODE" = "git" ]; then
+    echo -e "${YELLOW}3. Cài đặt NodeJS, NPM và tải mã nguồn từ Git...${NC}"
+    # Cài đặt NodeJS 18 nếu chưa có
+    if ! command -v node &> /dev/null; then
+        echo -e "${YELLOW}>> Đang cấu hình NodeJS 18...${NC}"
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        apt-get install -y nodejs git
+    else
+        apt-get install -y git
+    fi
 
-if [ ! -f /usr/local/bin/vps-manager ]; then
-    echo -e "${RED}Lỗi: Không thể tải tệp nhị phân. Vui lòng kiểm tra lại đường dẫn link tải.${NC}"
-    exit 1
+    # Dọn dẹp thư mục cũ để clone mới
+    rm -rf /var/www/vps-manager/* 2>/dev/null || true
+    rm -rf /var/www/vps-manager/.git 2>/dev/null || true
+    
+    echo -e "${YELLOW}>> Đang tải mã nguồn từ GitHub...${NC}"
+    git clone https://github.com/Phat-471/vps-manager.git /var/www/vps-manager
+    
+    echo -e "${YELLOW}>> Đang cài đặt các dependencies (npm install)...${NC}"
+    cd /var/www/vps-manager || exit
+    npm install --omit=dev
+    cd - >/dev/null || exit
+else
+    # Tải tệp nhị phân đã biên dịch sẵn
+    echo -e "${YELLOW}3. Đang tải tệp nhị phân VPS Manager đã biên dịch sẵn...${NC}"
+    BINARY_URL="https://github.com/Phat-471/vps-manager/releases/latest/download/vps-manager"
+    
+    echo -e "Nhập link tải tệp nhị phân (Bấm Enter để dùng mặc định từ Github: $BINARY_URL):"
+    read -r INPUT_URL
+    if [ -n "$INPUT_URL" ]; then
+        BINARY_URL="$INPUT_URL"
+    fi
+    
+    echo -e "Đang tải xuống từ: ${BLUE}$BINARY_URL${NC}..."
+    wget -q --show-progress -O /usr/local/bin/vps-manager "$BINARY_URL"
+    
+    if [ ! -f /usr/local/bin/vps-manager ] || [ ! -s /usr/local/bin/vps-manager ]; then
+        echo -e "${RED}Lỗi: Không thể tải tệp nhị phân hoặc file tải về bị trống (0 bytes).${NC}"
+        echo -e "${YELLOW}Gợi ý: Hãy thử chọn cài đặt bằng chế độ Git (Lựa chọn 1).${NC}"
+        exit 1
+    fi
+    
+    chmod +x /usr/local/bin/vps-manager
+    echo -e "${GREEN}Đã cài đặt tệp nhị phân tại /usr/local/bin/vps-manager${NC}"
 fi
-
-chmod +x /usr/local/bin/vps-manager
-echo -e "${GREEN}Đã cài đặt tệp nhị phân tại /usr/local/bin/vps-manager${NC}"
 
 echo -e "${YELLOW}4. Thiết lập cấu hình mạng & mật khẩu bảo vệ Panel...${NC}"
 # Tìm một port ngẫu nhiên chưa sử dụng từ 10000 - 65000
@@ -103,6 +139,26 @@ echo -e "${GREEN}Đã cấu hình cổng $PORT và mật khẩu Panel thành cô
 
 # Tạo service Systemd để tự khởi động và tự phục hồi
 echo -e "${YELLOW}5. Cấu hình Dịch vụ Hệ thống (Systemd Service)...${NC}"
+
+if [ "$INSTALL_MODE" = "git" ]; then
+cat <<EOF > /etc/systemd/system/vps-manager.service
+[Unit]
+Description=VPS Manager Panel Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/vps-manager
+ExecStart=/usr/bin/node server/server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+EOF
+else
 cat <<EOF > /etc/systemd/system/vps-manager.service
 [Unit]
 Description=VPS Manager Panel Service
@@ -120,6 +176,7 @@ Environment=NODE_ENV=production
 [Install]
 WantedBy=multi-user.target
 EOF
+fi
 
 # Nạp lại cấu hình và chạy service
 systemctl daemon-reload
@@ -145,9 +202,9 @@ echo -e "Liên kết đăng nhập tự động: ${GREEN}${INSTALL_LINK}${NC}"
 echo -e "${BLUE}--------------------------------------------------${NC}"
 echo -e "${RED}LƯU Ý QUAN TRỌNG:${NC}"
 echo -e "1. Hãy sao chép và lưu lại thông tin đăng nhập trên."
-2. Đảm bảo mở cổng ${GREEN}${PORT}${NC} trong cấu hình Firewall của nhà cung cấp VPS.
-3. Quản lý trạng thái Panel qua Systemd:
-   👉 Xem log hoạt động:  ${BLUE}journalctl -u vps-manager -n 50${NC}
-   👉 Khởi động lại:      ${BLUE}systemctl restart vps-manager${NC}
-   👉 Dừng hoạt động:     ${BLUE}systemctl stop vps-manager${NC}
-${BLUE}==================================================${NC}
+echo -e "2. Đảm bảo mở cổng ${GREEN}${PORT}${NC} trong cấu hình Firewall của nhà cung cấp VPS."
+echo -e "3. Quản lý trạng thái Panel qua Systemd:"
+echo -e "   👉 Xem log hoạt động:  ${BLUE}journalctl -u vps-manager -n 50${NC}"
+echo -e "   👉 Khởi động lại:      ${BLUE}systemctl restart vps-manager${NC}"
+echo -e "   👉 Dừng hoạt động:     ${BLUE}systemctl stop vps-manager${NC}"
+echo -e "${BLUE}==================================================${NC}"
