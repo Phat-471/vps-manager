@@ -1,0 +1,30 @@
+# ======= BẢO MẬT TỔNG THỂ CHO WEB PANEL VPS MANAGER =======
+
+# 1. Chặn truy cập trực tiếp vào config.php (file cấu hình nhạy cảm)
+<FilesMatch "^config\.php$">
+    Order Deny,Allow
+    Deny from all
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+</FilesMatch>
+
+# 2. Chặn xem danh sách thư mục (ai cũng xem được nếu không có file index)
+Options -Indexes
+
+# 3. Chặn truy cập vào các file backup, script shell, và file ẩn
+<FilesMatch "(^\.htaccess|\.bak$|\.old$|\.orig$|\.sql$)">
+    Order Deny,Allow
+    Deny from all
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+</FilesMatch>
+
+# 4. Thêm security headers bảo vệ người dùng truy cập web
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

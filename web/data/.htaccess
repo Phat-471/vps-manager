@@ -1,0 +1,10 @@
+# Chặn hoàn toàn mọi truy cập HTTP vào thư mục data/ này
+# Ngăn người ngoài đọc được file installations.json, licenses.json, audit_logs.json, bug_reports.json
+
+Order Deny,Allow
+Deny from all
+
+# Nếu server dùng Apache 2.4+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>

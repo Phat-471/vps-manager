@@ -26,5 +26,7 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Web dynamic data
-web/data/
+# Web dynamic data (không commit data nhạy cảm)
+web/data/*
+!web/data/.htaccess
+!web/data/.gitkeep
