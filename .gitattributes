@@ -1,0 +1,4 @@
+# Đảm bảo shell scripts luôn dùng LF (Unix line endings)
+*.sh text eol=lf
+*.php text eol=lf
+package.json text eol=lf
