@@ -192,12 +192,26 @@ echo -e "${YELLOW}1. Đang cập nhật danh sách gói hệ thống...${NC}"
 apt-get update -y || true
 
 echo -e "${YELLOW}2. Cài đặt các công cụ cơ bản (Git, Curl, Wget, Cron)...${NC}"
+# Giải phóng locks của APT và DPKG (rất hay gặp khi VPS vừa khởi động xong đang chạy tự động cập nhật)
+systemctl stop unattended-upgrades 2>/dev/null || true
+killall apt apt-get dpkg 2>/dev/null || true
+rm -f /var/lib/apt/lists/lock
+rm -f /var/cache/apt/archives/lock
+rm -f /var/lib/dpkg/lock*
+dpkg --configure -a || true
+
 # Giải phóng thuộc tính chống ghi (immutable) nếu có trên các thư mục/tệp tin hệ thống
 if command -v chattr &>/dev/null; then
     chattr -R -i /usr/bin /usr/sbin /bin /sbin 2>/dev/null || true
     chattr -i /usr/bin/wget /usr/bin/curl /usr/bin/git /usr/bin/unzip /usr/bin/funzip 2>/dev/null || true
 fi
-apt-get install -y git curl wget unzip cron
+
+# Chạy lệnh cài đặt và tự động sửa lỗi dependencies nếu gặp sự cố
+apt-get install -y git curl wget unzip cron || {
+    echo -e "${YELLOW}Cảnh báo: Lệnh cài đặt cơ bản bị gián đoạn. Đang thử sửa lỗi gói và cài lại...${NC}"
+    apt-get install -f -y || true
+    apt-get install -y git curl wget unzip cron
+}
 
 # Đảm bảo dịch vụ cron được kích hoạt và chạy nền
 if command -v systemctl &>/dev/null; then
