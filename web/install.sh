@@ -86,11 +86,15 @@ if [ -t 0 ]; then
 elif [ -c /dev/tty ]; then
   read -r LICENSE_KEY </dev/tty
 else
-  LICENSE_KEY=""
+  read -r LICENSE_KEY
 fi
 
 if [ -z "$LICENSE_KEY" ]; then
-  echo -e "${RED}Lỗi: Không tìm thấy License Key. Trình cài đặt dừng lại.${NC}"
+  echo -e "${RED}Lỗi: Không tìm thấy License Key.${NC}"
+  echo -e "${YELLOW}Gợi ý: Do bạn chạy lệnh qua pipe (curl ... | bash), hệ thống không thể đọc được thiết bị nhập liệu (tty).${NC}"
+  echo -e "${YELLOW}Vui lòng chạy lệnh cài đặt bằng một trong hai cách sau để nhập được Key:${NC}"
+  echo -e "${GREEN}Cách 1: bash <(curl -sSL https://hoangphat.site)${NC}"
+  echo -e "${GREEN}Cách 2: curl -sSL https://hoangphat.site -o install.sh && bash install.sh${NC}"
   exit 1
 fi
 
