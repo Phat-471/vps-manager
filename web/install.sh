@@ -246,12 +246,48 @@ if [ -n "$INPUT_REPO" ]; then
 fi
 
 rm -rf /var/www/vps-manager
-echo -e "Đang tải mã nguồn từ: ${BLUE}$GIT_REPO${NC}..."
-git clone "$GIT_REPO" /var/www/vps-manager
+mkdir -p /var/www/vps-manager
 
-if [ ! -d /var/www/vps-manager ]; then
-    echo -e "${RED}Lỗi: Không thể tải mã nguồn từ Git.${NC}"
-    report_status "failed" "Không thể clone mã nguồn từ Git" "" "" "$OS_VERSION"
+DOWNLOAD_SUCCESS=0
+if [ -n "$PANEL_URL" ] && [ "$PANEL_URL" != "PANEL_URL_""PLACEHOLDER" ]; then
+    echo -e "${BLUE}Đang tải gói cài đặt nén (ZIP) trực tiếp từ server trung tâm...${NC}"
+    curl -k -sSL "$PANEL_URL/vps-manager.zip" -o /tmp/vps-manager.zip
+    
+    if [ -f /tmp/vps-manager.zip ] && unzip -t /tmp/vps-manager.zip &>/dev/null; then
+        echo -e "${GREEN}Đang giải nén mã nguồn...${NC}"
+        unzip -q -o /tmp/vps-manager.zip -d /var/www/
+        # Hỗ trợ nếu zip giải nén ra thư mục con vps-manager-main
+        if [ -d /var/www/vps-manager-main ]; then
+            rm -rf /var/www/vps-manager
+            mv /var/www/vps-manager-main /var/www/vps-manager
+        fi
+        rm -f /tmp/vps-manager.zip
+        DOWNLOAD_SUCCESS=1
+        echo -e "${GREEN}Tải mã nguồn từ Server trung tâm thành công!${NC}"
+    fi
+fi
+
+if [ "$DOWNLOAD_SUCCESS" -eq 0 ]; then
+    echo -e "${YELLOW}Không thể tải/giải nén file ZIP từ Server trung tâm. Đang chuyển sang tải từ Git...${NC}"
+    echo -e "Nhập link Git chứa code của bạn (Bấm Enter để dùng mặc định: $GIT_REPO):"
+    if [ -t 0 ]; then
+        read -r INPUT_REPO
+    elif [ -c /dev/tty ]; then
+        read -r INPUT_REPO </dev/tty
+    else
+        INPUT_REPO=""
+    fi
+    if [ -n "$INPUT_REPO" ]; then
+        GIT_REPO="$INPUT_REPO"
+    fi
+    
+    echo -e "Đang tải mã nguồn từ: ${BLUE}$GIT_REPO${NC}..."
+    git clone "$GIT_REPO" /var/www/vps-manager
+fi
+
+if [ ! -d /var/www/vps-manager ] || [ ! -f /var/www/vps-manager/package.json ]; then
+    echo -e "${RED}Lỗi: Không thể tải mã nguồn hợp lệ từ cả Server trung tâm lẫn Git.${NC}"
+    report_status "failed" "Không thể tải mã nguồn" "" "" "$OS_VERSION"
     exit 1
 fi
 
