@@ -935,6 +935,311 @@ EOF
             });
         }
 
+        if (appId === 'uptime-kuma') {
+            const safePort = parseInt(port) || 3001;
+            let nginxProxyCmd = '';
+            let appUrl = `http://${host}:${safePort}`;
+
+            if (domain) {
+                const safeDomain = sanitizeAlphaNum(domain);
+                appUrl = (ssl === true || ssl === 'true') ? `https://${safeDomain}` : `http://${safeDomain}`;
+                nginxProxyCmd = `
+                    echo ">> Tạo cấu hình Nginx Reverse Proxy cho Uptime Kuma..."
+                    cat > /etc/nginx/sites-available/${safeDomain} << 'EOF'
+server {
+    listen 80;
+    server_name ${safeDomain} *.${safeDomain};
+
+    client_max_body_size 64M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${safePort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+                    echo ">> Kích hoạt cấu hình Nginx..."
+                    ln -sf /etc/nginx/sites-available/${safeDomain} /etc/nginx/sites-enabled/
+                    nginx -t
+                    systemctl reload nginx
+                `;
+            }
+
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT UPTIME KUMA ==="
+                
+                if ! command -v docker &> /dev/null; then
+                    echo ">> Docker chưa được cài đặt. Đang cài đặt Docker..."
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                        apt-get update && apt-get install -y docker.io
+                    else
+                        yum install -y docker
+                    fi
+                    systemctl start docker
+                    systemctl enable docker
+                fi
+
+                if docker ps -a | grep -q uptime-kuma; then
+                    echo ">> Container uptime-kuma đã tồn tại. Khởi động lại..."
+                    docker restart uptime-kuma
+                else
+                    echo ">> Khởi chạy Uptime Kuma..."
+                    docker run -d --name uptime-kuma -p ${safePort}:3001 --restart always -v uptime-kuma:/app/data louislam/uptime-kuma:1
+                fi
+
+                ${nginxProxyCmd}
+                ${sslCmd}
+
+                echo "=== CÀI ĐẶT UPTIME KUMA HOÀN TẤT ==="
+            `;
+
+            return res.json({
+                success: true,
+                command: command.trim(),
+                data: {
+                    siteUrl: appUrl
+                }
+            });
+        }
+
+        if (appId === 'ghost') {
+            const safePort = parseInt(port) || 2368;
+            const safeDomain = domain ? sanitizeAlphaNum(domain) : '';
+            let nginxProxyCmd = '';
+            let appUrl = `http://${host}:${safePort}`;
+
+            if (safeDomain) {
+                appUrl = (ssl === true || ssl === 'true') ? `https://${safeDomain}` : `http://${safeDomain}`;
+                nginxProxyCmd = `
+                    echo ">> Tạo cấu hình Nginx Reverse Proxy cho Ghost..."
+                    cat > /etc/nginx/sites-available/${safeDomain} << 'EOF'
+server {
+    listen 80;
+    server_name ${safeDomain} *.${safeDomain};
+
+    client_max_body_size 64M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${safePort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+                    echo ">> Kích hoạt cấu hình Nginx..."
+                    ln -sf /etc/nginx/sites-available/${safeDomain} /etc/nginx/sites-enabled/
+                    nginx -t
+                    systemctl reload nginx
+                `;
+            }
+
+            const ghostUrl = safeDomain ? appUrl : `http://${host}:${safePort}`;
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT GHOST ==="
+                
+                if ! command -v docker &> /dev/null; then
+                    echo ">> Docker chưa được cài đặt. Đang cài đặt Docker..."
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                        apt-get update && apt-get install -y docker.io
+                    else
+                        yum install -y docker
+                    fi
+                    systemctl start docker
+                    systemctl enable docker
+                fi
+
+                if docker ps -a | grep -q ghost; then
+                    echo ">> Container ghost đã tồn tại. Khởi động lại..."
+                    docker restart ghost
+                else
+                    echo ">> Khởi chạy Ghost..."
+                    docker run -d --name ghost -e url=${ghostUrl} -p ${safePort}:2368 --restart always ghost:alpine
+                fi
+
+                ${nginxProxyCmd}
+                ${sslCmd}
+
+                echo "=== CÀI ĐẶT GHOST HOÀN TẤT ==="
+            `;
+
+            return res.json({
+                success: true,
+                command: command.trim(),
+                data: {
+                    siteUrl: appUrl
+                }
+            });
+        }
+
+        if (appId === 'nextcloud') {
+            const safePort = parseInt(port) || 8080;
+            let nginxProxyCmd = '';
+            let appUrl = `http://${host}:${safePort}`;
+
+            if (domain) {
+                const safeDomain = sanitizeAlphaNum(domain);
+                appUrl = (ssl === true || ssl === 'true') ? `https://${safeDomain}` : `http://${safeDomain}`;
+                nginxProxyCmd = `
+                    echo ">> Tạo cấu hình Nginx Reverse Proxy cho Nextcloud..."
+                    cat > /etc/nginx/sites-available/${safeDomain} << 'EOF'
+server {
+    listen 80;
+    server_name ${safeDomain} *.${safeDomain};
+
+    client_max_body_size 512M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${safePort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+                    echo ">> Kích hoạt cấu hình Nginx..."
+                    ln -sf /etc/nginx/sites-available/${safeDomain} /etc/nginx/sites-enabled/
+                    nginx -t
+                    systemctl reload nginx
+                `;
+            }
+
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT NEXTCLOUD ==="
+                
+                if ! command -v docker &> /dev/null; then
+                    echo ">> Docker chưa được cài đặt. Đang cài đặt Docker..."
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                        apt-get update && apt-get install -y docker.io
+                    else
+                        yum install -y docker
+                    fi
+                    systemctl start docker
+                    systemctl enable docker
+                fi
+
+                if docker ps -a | grep -q nextcloud; then
+                    echo ">> Container nextcloud đã tồn tại. Khởi động lại..."
+                    docker restart nextcloud
+                else
+                    echo ">> Khởi chạy Nextcloud..."
+                    docker run -d --name nextcloud -p ${safePort}:80 --restart always nextcloud:apache
+                fi
+
+                ${nginxProxyCmd}
+                ${sslCmd}
+
+                echo "=== CÀI ĐẶT NEXTCLOUD HOÀN TẤT ==="
+            `;
+
+            return res.json({
+                success: true,
+                command: command.trim(),
+                data: {
+                    siteUrl: appUrl
+                }
+            });
+        }
+
+        if (appId === 'n8n') {
+            const safePort = parseInt(port) || 5678;
+            let nginxProxyCmd = '';
+            let appUrl = `http://${host}:${safePort}`;
+
+            if (domain) {
+                const safeDomain = sanitizeAlphaNum(domain);
+                appUrl = (ssl === true || ssl === 'true') ? `https://${safeDomain}` : `http://${safeDomain}`;
+                nginxProxyCmd = `
+                    echo ">> Tạo cấu hình Nginx Reverse Proxy cho n8n..."
+                    cat > /etc/nginx/sites-available/${safeDomain} << 'EOF'
+server {
+    listen 80;
+    server_name ${safeDomain} *.${safeDomain};
+
+    client_max_body_size 64M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${safePort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+                    echo ">> Kích hoạt cấu hình Nginx..."
+                    ln -sf /etc/nginx/sites-available/${safeDomain} /etc/nginx/sites-enabled/
+                    nginx -t
+                    systemctl reload nginx
+                `;
+            }
+
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT N8N ==="
+                
+                if ! command -v docker &> /dev/null; then
+                    echo ">> Docker chưa được cài đặt. Đang cài đặt Docker..."
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                        apt-get update && apt-get install -y docker.io
+                    else
+                        yum install -y docker
+                    fi
+                    systemctl start docker
+                    systemctl enable docker
+                fi
+
+                if docker ps -a | grep -q n8n; then
+                    echo ">> Container n8n đã tồn tại. Khởi động lại..."
+                    docker restart n8n
+                else
+                    echo ">> Khởi chạy n8n..."
+                    docker run -d --name n8n -p ${safePort}:5678 --restart always n8nio/n8n
+                fi
+
+                ${nginxProxyCmd}
+                ${sslCmd}
+
+                echo "=== CÀI ĐẶT N8N HOÀN TẤT ==="
+            `;
+
+            return res.json({
+                success: true,
+                command: command.trim(),
+                data: {
+                    siteUrl: appUrl
+                }
+            });
+        }
+
         return res.status(400).json({ success: false, error: 'Ứng dụng không hỗ trợ' });
 
     } catch (err) {

@@ -226,7 +226,7 @@ ${logs}
     setEmail('');
     setAppName('');
     setGitUrl('');
-    setPort('3000');
+    setPort(tab === 'uptime-kuma' ? '3001' : tab === 'ghost' ? '2368' : tab === 'nextcloud' ? '8080' : tab === 'n8n' ? '5678' : '3000');
     setSiteTitle('My WordPress Site');
     setAdminUser('admin');
     setAdminPass(Math.random().toString(36).substring(2, 14));
@@ -298,6 +298,13 @@ ${logs}
         payload.pmaPort = pmaPort.trim();
         payload.pmaUser = pmaUser.trim();
         payload.pmaPassword = pmaPassword.trim();
+      } else if (['uptime-kuma', 'ghost', 'nextcloud', 'n8n'].includes(activeTab)) {
+        payload.port = port.trim();
+        if (domain.trim()) {
+          payload.domain = domain.trim();
+          payload.ssl = ssl;
+          payload.email = email.trim();
+        }
       }
 
       // Call the preparation API to get setup script
@@ -384,6 +391,34 @@ ${logs}
           <span className="fab fa-node-js text-lg mr-1.5" style={{ color: '#68a063' }}></span>
           Node.js App
         </button>
+        <button 
+          onClick={() => handleTabChange('uptime-kuma')}
+          className={`db-tab-item ${activeTab === 'uptime-kuma' ? 'active' : ''}`}
+        >
+          <span className="fas fa-heartbeat text-lg mr-1.5" style={{ color: '#68a063' }}></span>
+          Uptime Kuma
+        </button>
+        <button 
+          onClick={() => handleTabChange('ghost')}
+          className={`db-tab-item ${activeTab === 'ghost' ? 'active' : ''}`}
+        >
+          <span className="fas fa-ghost text-lg mr-1.5" style={{ color: '#f7a800' }}></span>
+          Ghost
+        </button>
+        <button 
+          onClick={() => handleTabChange('nextcloud')}
+          className={`db-tab-item ${activeTab === 'nextcloud' ? 'active' : ''}`}
+        >
+          <span className="fas fa-cloud text-lg mr-1.5" style={{ color: '#0082c9' }}></span>
+          Nextcloud
+        </button>
+        <button 
+          onClick={() => handleTabChange('n8n')}
+          className={`db-tab-item ${activeTab === 'n8n' ? 'active' : ''}`}
+        >
+          <span className="fas fa-project-diagram text-lg mr-1.5" style={{ color: '#ff6d5a' }}></span>
+          n8n
+        </button>
       </div>
 
       <div className="grid gap-6" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
@@ -396,6 +431,10 @@ ${logs}
               {activeTab === 'phpmyadmin' && 'phpMyAdmin Deployer'}
               {activeTab === 'portainer' && 'Portainer Container Deployer'}
               {activeTab === 'nodeapp' && 'Node.js Git Deployer'}
+              {activeTab === 'uptime-kuma' && 'Uptime Kuma Deployer'}
+              {activeTab === 'ghost' && 'Ghost Blog Deployer'}
+              {activeTab === 'nextcloud' && 'Nextcloud Deployer'}
+              {activeTab === 'n8n' && 'n8n Workflow Deployer'}
             </h2>
             
             <div className="p-4 bg-indigo-500/5 border border-indigo-500/10 rounded-lg space-y-2 text-xs text-gray-300">
@@ -407,6 +446,10 @@ ${logs}
                   {activeTab === 'phpmyadmin' && 'Cài đặt và thiết lập phpMyAdmin phiên bản 5.2.1 trên cổng 8888 chạy độc lập qua Nginx để quản trị CSDL.'}
                   {activeTab === 'portainer' && 'Khởi chạy giao diện Docker Portainer GUI trên cổng 9000 (HTTP) và 9443 (HTTPS) để quản lý container trực quan.'}
                   {activeTab === 'nodeapp' && 'Tự động clone code từ Git Repo (Public), cài đặt production dependencies, tạo tài khoản pm2user và chạy nền qua PM2.'}
+                  {activeTab === 'uptime-kuma' && 'Cài đặt công cụ giám sát Uptime Kuma (mặc định cổng 3001). Hỗ trợ Reverse Proxy qua Nginx và HTTPS.'}
+                  {activeTab === 'ghost' && 'Cài đặt nền tảng xuất bản blog Ghost (mặc định cổng 2368). Hỗ trợ Reverse Proxy qua Nginx và HTTPS.'}
+                  {activeTab === 'nextcloud' && 'Cài đặt dịch vụ lưu trữ đám mây cá nhân Nextcloud (mặc định cổng 8080). Hỗ trợ Reverse Proxy và HTTPS.'}
+                  {activeTab === 'n8n' && 'Cài đặt công cụ tự động hóa quy trình n8n (mặc định cổng 5678). Hỗ trợ Reverse Proxy và HTTPS.'}
                 </span>
               </div>
             </div>
@@ -981,6 +1024,83 @@ ${logs}
                   </div>
                 )}
 
+                {['uptime-kuma', 'ghost', 'nextcloud', 'n8n'].includes(activeTab) && (
+                  <>
+                    <div className="form-group">
+                      <label className="text-xs text-gray-400 block mb-1">Cổng dịch vụ chạy (Port):</label>
+                      <div className="flex items-center input-glass px-3 py-1">
+                        <Server size={14} className="text-gray-500 mr-2" />
+                        <input
+                          type="number"
+                          required
+                          value={port}
+                          onChange={e => setPort(e.target.value)}
+                          disabled={running}
+                          className="bg-transparent border-none outline-none text-xs text-gray-100 w-full"
+                          style={{ background: 'none', border: 'none', padding: '6px 0' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="text-xs text-gray-400 block mb-1">Tên miền hoạt động (Tùy chọn - Nginx Proxy):</label>
+                      <div className="flex items-center input-glass px-3 py-1">
+                        <Globe size={14} className="text-gray-500 mr-2" />
+                        <input
+                          type="text"
+                          placeholder="ví dụ: sub.mywebsite.com (để trống nếu chạy qua cổng IP trực tiếp)"
+                          value={domain}
+                          onChange={e => setDomain(e.target.value)}
+                          disabled={running}
+                          className="bg-transparent border-none outline-none text-xs text-gray-100 w-full"
+                          style={{ background: 'none', border: 'none', padding: '6px 0' }}
+                        />
+                      </div>
+                      <small className="text-[10px] text-gray-500 block leading-tight mt-1">
+                        Nếu nhập tên miền, hệ thống sẽ tự động cấu hình Nginx Reverse Proxy trỏ đến cổng ứng dụng này.
+                      </small>
+                    </div>
+
+                    {domain.trim() && (
+                      <div className="p-3 bg-white/5 rounded-lg border border-white/10 space-y-3 animate-fade-in">
+                        <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span className="text-xs text-gray-300 font-semibold flex items-center gap-1.5">
+                            <Key size={14} className="text-indigo-400" />
+                            Bảo mật SSL Let's Encrypt (HTTPS):
+                          </span>
+                          <label className="switch-container">
+                            <input
+                              type="checkbox"
+                              checked={ssl}
+                              onChange={e => setSsl(e.target.checked)}
+                              disabled={running}
+                            />
+                            <span className="switch-slider"></span>
+                          </label>
+                        </div>
+                        {ssl && (
+                          <div className="form-group pt-1">
+                            <label className="text-[11px] text-gray-400 block mb-1">Email đăng ký SSL (Let's Encrypt Email):</label>
+                            <div className="flex items-center input-glass px-3 py-1">
+                              <Mail size={12} className="text-gray-500 mr-2" />
+                              <input
+                                type="email"
+                                required
+                                placeholder="ví dụ: admin@domain.com"
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                disabled={running}
+                                className="bg-transparent border-none outline-none text-xs text-gray-100 w-full"
+                                style={{ background: 'none', border: 'none', padding: '4px 0' }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <div className="flex gap-3">
                   {running ? (
                     <button
@@ -994,7 +1114,7 @@ ${logs}
                   ) : (
                     <button
                       type="submit"
-                      disabled={loading || ((activeTab === 'wordpress' || activeTab === 'laravel') && !domain.trim()) || (activeTab === 'nodeapp' && (!appName.trim() || !gitUrl.trim()))}
+                      disabled={loading || ((activeTab === 'wordpress' || activeTab === 'laravel') && !domain.trim()) || (activeTab === 'nodeapp' && (!appName.trim() || !gitUrl.trim())) || (['uptime-kuma', 'ghost', 'nextcloud', 'n8n'].includes(activeTab) && domain.trim() && ssl && !email.trim())}
                       className="btn btn-primary w-full py-2.5 flex items-center justify-center gap-2 font-semibold text-xs rounded-lg"
                     >
                       {loading ? (
@@ -1167,6 +1287,17 @@ ${logs}
                       <span className="text-gray-400">Đường dẫn hoạt động:</span>
                       <a href={installedData.appUrl} target="_blank" rel="noreferrer" className="text-indigo-400 font-semibold underline hover:text-indigo-300">
                         {installedData.appUrl}
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {['uptime-kuma', 'ghost', 'nextcloud', 'n8n'].includes(activeTab) && (
+                  <div className="p-3 bg-black/40 rounded-lg space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-400">Đường dẫn hoạt động:</span>
+                      <a href={installedData.siteUrl} target="_blank" rel="noreferrer" className="text-indigo-400 font-semibold underline hover:text-indigo-300">
+                        {installedData.siteUrl}
                       </a>
                     </div>
                   </div>
