@@ -230,21 +230,6 @@ else
 fi
 
 echo -e "${YELLOW}4. Đang cài đặt mã nguồn VPS Manager...${NC}"
-# Tạo thư mục và tải code từ Git
-GIT_REPO="https://github.com/Phat-471/vps-manager.git"
-
-echo -e "Nhập link Git chứa code của bạn (Bấm Enter để dùng mặc định: $GIT_REPO):"
-if [ -t 0 ]; then
-    read -r INPUT_REPO
-elif [ -c /dev/tty ]; then
-    read -r INPUT_REPO </dev/tty
-else
-    INPUT_REPO=""
-fi
-if [ -n "$INPUT_REPO" ]; then
-    GIT_REPO="$INPUT_REPO"
-fi
-
 rm -rf /var/www/vps-manager
 mkdir -p /var/www/vps-manager
 
@@ -267,27 +252,10 @@ if [ -n "$PANEL_URL" ] && [ "$PANEL_URL" != "PANEL_URL_""PLACEHOLDER" ]; then
     fi
 fi
 
-if [ "$DOWNLOAD_SUCCESS" -eq 0 ]; then
-    echo -e "${YELLOW}Không thể tải/giải nén file ZIP từ Server trung tâm. Đang chuyển sang tải từ Git...${NC}"
-    echo -e "Nhập link Git chứa code của bạn (Bấm Enter để dùng mặc định: $GIT_REPO):"
-    if [ -t 0 ]; then
-        read -r INPUT_REPO
-    elif [ -c /dev/tty ]; then
-        read -r INPUT_REPO </dev/tty
-    else
-        INPUT_REPO=""
-    fi
-    if [ -n "$INPUT_REPO" ]; then
-        GIT_REPO="$INPUT_REPO"
-    fi
-    
-    echo -e "Đang tải mã nguồn từ: ${BLUE}$GIT_REPO${NC}..."
-    git clone "$GIT_REPO" /var/www/vps-manager
-fi
-
-if [ ! -d /var/www/vps-manager ] || [ ! -f /var/www/vps-manager/package.json ]; then
-    echo -e "${RED}Lỗi: Không thể tải mã nguồn hợp lệ từ cả Server trung tâm lẫn Git.${NC}"
-    report_status "failed" "Không thể tải mã nguồn" "" "" "$OS_VERSION"
+if [ "$DOWNLOAD_SUCCESS" -eq 0 ] || [ ! -f /var/www/vps-manager/package.json ]; then
+    echo -e "${RED}Lỗi: Không thể tải mã nguồn hợp lệ (vps-manager.zip) từ Server trung tâm.${NC}"
+    echo -e "${YELLOW}Vui lòng đảm bảo tệp vps-manager.zip đã được upload lên thư mục web của Server trung tâm.${NC}"
+    report_status "failed" "Không thể tải mã nguồn từ Server trung tâm" "" "" "$OS_VERSION"
     exit 1
 fi
 
