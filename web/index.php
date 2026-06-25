@@ -37,6 +37,8 @@ if ($is_cli) {
         $content = str_replace('PANEL_URL_PLACEHOLDER', $panel_url, $content);
         // Thay thế token bảo mật
         $content = str_replace('SECURITY_TOKEN_PLACEHOLDER', $SECURITY_TOKEN, $content);
+        // Chuyển đổi định dạng dòng từ Windows (CRLF) sang Linux (LF)
+        $content = str_replace(["\r\n", "\r"], "\n", $content);
         echo $content;
     } else {
         echo "# Lỗi: Không tìm thấy tệp install.sh mẫu trên máy chủ trung tâm.\n";
