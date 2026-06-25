@@ -240,11 +240,12 @@ if [ -n "$PANEL_URL" ] && [ "$PANEL_URL" != "PANEL_URL_""PLACEHOLDER" ]; then
     
     if [ -f /tmp/vps-manager.zip ] && unzip -t /tmp/vps-manager.zip &>/dev/null; then
         echo -e "${GREEN}Đang giải nén mã nguồn...${NC}"
-        unzip -q -o /tmp/vps-manager.zip -d /var/www/
+        mkdir -p /var/www/vps-manager
+        unzip -q -o /tmp/vps-manager.zip -d /var/www/vps-manager/
         # Hỗ trợ nếu zip giải nén ra thư mục con vps-manager-main
-        if [ -d /var/www/vps-manager-main ]; then
-            rm -rf /var/www/vps-manager
-            mv /var/www/vps-manager-main /var/www/vps-manager
+        if [ -d /var/www/vps-manager/vps-manager-main ]; then
+            mv /var/www/vps-manager/vps-manager-main/* /var/www/vps-manager/
+            rm -rf /var/www/vps-manager/vps-manager-main
         fi
         rm -f /tmp/vps-manager.zip
         DOWNLOAD_SUCCESS=1
