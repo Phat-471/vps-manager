@@ -157,13 +157,7 @@ if [ -d /var/www/vps-manager ]; then
     echo -e "  [2] Cài đặt sạch (Clean Reinstall): Xóa sạch toàn bộ dữ liệu cũ và cài lại."
     echo -e "  [3] Hủy bỏ (Cancel)."
     echo -n "Nhập lựa chọn của bạn (1-3, mặc định 1): "
-    if [ -t 0 ]; then
-        read -r UPDATE_CHOICE
-    elif [ -c /dev/tty ]; then
-        read -r UPDATE_CHOICE </dev/tty
-    else
-        UPDATE_CHOICE="1"
-    fi
+    read -r UPDATE_CHOICE < /dev/tty
     
     if [ -z "$UPDATE_CHOICE" ] || [ "$UPDATE_CHOICE" = "1" ]; then
         echo -e "${GREEN}>> Đã chọn chế độ: NÂNG CẤP HỆ THỐNG (Bảo toàn dữ liệu)${NC}"
@@ -318,13 +312,7 @@ else
 
     echo -e "Chúng tôi đề xuất chạy Panel trên cổng ngẫu nhiên bảo mật: ${GREEN}$RANDOM_PORT${NC}"
     echo -e "Nhập cổng bạn muốn sử dụng (Bấm Enter để dùng cổng đề xuất: $RANDOM_PORT):"
-    if [ -t 0 ]; then
-        read -r INPUT_PORT
-    elif [ -c /dev/tty ]; then
-        read -r INPUT_PORT </dev/tty
-    else
-        INPUT_PORT=""
-    fi
+    read -r INPUT_PORT < /dev/tty
     if [ -n "$INPUT_PORT" ] && [[ "$INPUT_PORT" =~ ^[0-9]+$ ]]; then
         PORT="$INPUT_PORT"
     else
@@ -332,13 +320,8 @@ else
     fi
 
     echo -e "Nhập mật khẩu Panel bạn muốn đặt (Tối thiểu 6 ký tự, nhập ẩn, bấm Enter để tự động tạo):"
-    if [ -t 0 ]; then
-        read -r -s PANEL_PW
-    elif [ -c /dev/tty ]; then
-        read -r -s PANEL_PW </dev/tty
-    else
-        PANEL_PW=""
-    fi
+    read -r -s PANEL_PW < /dev/tty
+    echo
     if [ -z "$PANEL_PW" ]; then
         # Tạo mật khẩu ngẫu nhiên 12 ký tự an toàn
         PANEL_PW=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
@@ -346,13 +329,8 @@ else
     else
         while [ ${#PANEL_PW} -lt 6 ]; do
             echo -e "${RED}Mật khẩu quá ngắn, vui lòng nhập lại (Tối thiểu 6 ký tự):${NC}"
-            if [ -t 0 ]; then
-                read -r -s PANEL_PW
-            elif [ -c /dev/tty ]; then
-                read -r -s PANEL_PW </dev/tty
-            else
-                break
-            fi
+            read -r -s PANEL_PW < /dev/tty
+            echo
         done
     fi
 
