@@ -164,6 +164,7 @@ export default function Terminal() {
             ref={terminalRef}
             id="terminal"
             className="w-full h-full rounded-lg overflow-hidden"
+            style={{ fontFamily: 'Courier New, Courier, monospace' }}
           />
         </div>
 

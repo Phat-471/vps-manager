@@ -55,7 +55,7 @@ body, input, button, select, textarea {
 }
 
 /* Fix xterm character spacing bug caused by font overrides */
-.xterm-rows, .xterm-rows * {
+.xterm, .xterm *, #terminal, #terminal * {
   font-family: 'Courier New', Courier, monospace !important;
   letter-spacing: normal !important;
 }
