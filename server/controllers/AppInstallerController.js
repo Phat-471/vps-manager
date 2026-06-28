@@ -1240,6 +1240,110 @@ EOF
             });
         }
 
+        if (appId === 'fail2ban') {
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT FAIL2BAN ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y fail2ban
+                else
+                    yum install -y fail2ban
+                fi
+                systemctl enable fail2ban || true
+                systemctl start fail2ban || true
+                fail2ban-client --version
+                echo "=== CÀI ĐẶT FAIL2BAN HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'pm2') {
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT PM2 ==="
+                
+                # Check NodeJS & NPM
+                if ! command -v node &> /dev/null; then
+                    echo ">> Node.js chưa được cài đặt. Đang cài đặt..."
+                    if [ -f /etc/debian_version ]; then
+                        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+                        apt-get install -y nodejs
+                    else
+                        curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+                        yum install -y nodejs
+                    fi
+                fi
+                
+                npm install -g pm2
+                if ! id -u pm2user &>/dev/null; then
+                    useradd -m -s /bin/bash pm2user
+                fi
+                pm2 startup systemd -u pm2user --hp /home/pm2user || pm2 startup systemd || true
+                pm2 save --force || true
+                pm2 --version
+                echo "=== CÀI ĐẶT PM2 HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'nginx') {
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT NGINX ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+                else
+                    yum install -y nginx
+                fi
+                systemctl enable nginx || true
+                systemctl start nginx || true
+                nginx -v
+                echo "=== CÀI ĐẶT NGINX HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'docker') {
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT DOCKER ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update && apt-get install -y ca-certificates curl gnupg
+                    install -m 0755 -d /etc/apt/keyrings
+                    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg || true
+                    chmod a+r /etc/apt/keyrings/docker.gpg || true
+                    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "\\$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+                    apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || apt-get install -y docker.io docker-compose
+                else
+                    yum install -y docker docker-compose
+                fi
+                systemctl start docker || true
+                systemctl enable docker || true
+                docker --version
+                echo "=== CÀI ĐẶT DOCKER HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'certbot') {
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT CERTBOT ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y certbot python3-certbot-nginx
+                else
+                    yum install -y epel-release && yum install -y certbot python3-certbot-nginx
+                fi
+                certbot --version
+                echo "=== CÀI ĐẶT CERTBOT HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
         return res.status(400).json({ success: false, error: 'Ứng dụng không hỗ trợ' });
 
     } catch (err) {
