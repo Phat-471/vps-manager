@@ -11,3 +11,11 @@
    - Các file script cài đặt và cập nhật (`.sh`) bắt buộc phải sử dụng định dạng xuống dòng của Linux (LF) thay vì Windows (CRLF).
 4. **Xác nhận trạng thái**:
    - Chỉ upload và phát hành mã nguồn lên máy chủ trung tâm (`hoangphat.site`) sau khi tất cả các bước test trên đã vượt qua thành công.
+
+## Quy trình tạo cập nhật tự động khi được yêu cầu (Auto Release Command)
+
+Khi người dùng yêu cầu "tạo cập nhật" (hoặc "create update", "release"), AI phải tự động thực hiện các bước sau:
+1. **Kiểm tra & Build Frontend**: Chạy thử `npm run build` trong thư mục `frontend` để kiểm tra lỗi và sinh file tĩnh trong thư mục `public/`.
+2. **Kiểm tra định dạng file script**: Đảm bảo toàn bộ các tệp `.sh` sử dụng định dạng xuống dòng LF.
+3. **Tăng phiên bản (Version Bumping)**: Tự động đọc và tăng phiên bản trong `package.json` (ví dụ từ `1.1.2` lên `1.1.3`).
+4. **Commit & Push**: Thực hiện `git add .`, `git commit -m "..."` và `git push origin main` để cập nhật mã nguồn lên GitHub.
