@@ -16,7 +16,8 @@ function create(socket, vpsConfig) {
 
     if (isLocal) {
         const { spawn } = require('child_process');
-        const shell = spawn('/bin/bash', [], {
+        // Use 'script' to allocate a pseudo-TTY for interactive terminal behavior
+        const shell = spawn('script', ['-q', '-c', '/bin/bash', '/dev/null'], {
             env: { ...process.env, TERM: 'xterm-256color' }
         });
 
