@@ -51,7 +51,7 @@ if [ -f /var/www/vps-manager/.env ]; then
     if [ -n "$EXISTING_PORT" ] && [ -n "$EXISTING_PW" ]; then
         echo -e "${YELLOW}>> Phát hiện cấu hình cũ (Port: $EXISTING_PORT).${NC}"
         echo -n "Bạn có muốn giữ lại Port và Mật khẩu Panel cũ không? (y/n, mặc định y): "
-        read -r REUSE_DECISION
+        read -r REUSE_DECISION < /dev/tty
         if [ -z "$REUSE_DECISION" ] || [ "$REUSE_DECISION" = "y" ] || [ "$REUSE_DECISION" = "Y" ]; then
             REUSE_CONFIG="y"
             mkdir -p /tmp/vps_manager_bak
@@ -131,7 +131,8 @@ else
 
     echo -e "Cổng đề xuất (ngẫu nhiên): ${GREEN}$RANDOM_PORT${NC}"
     echo -e "Nhập cổng bạn muốn dùng (Nhấn Enter để dùng cổng đề xuất: $RANDOM_PORT):"
-    read -r INPUT_PORT
+    # Đọc từ /dev/tty để hoạt động đúng khi chạy qua curl | bash
+    read -r INPUT_PORT < /dev/tty
     if [ -n "$INPUT_PORT" ] && [[ "$INPUT_PORT" =~ ^[0-9]+$ ]]; then
         PORT="$INPUT_PORT"
     else
@@ -139,14 +140,17 @@ else
     fi
 
     echo -e "Nhập mật khẩu Panel (tối thiểu 6 ký tự, nhấn Enter để tạo ngẫu nhiên):"
-    read -r -s PANEL_PW
+    # Đọc từ /dev/tty để hoạt động đúng khi chạy qua curl | bash
+    read -r -s PANEL_PW < /dev/tty
+    echo
     if [ -z "$PANEL_PW" ]; then
         PANEL_PW=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
         echo -e "${GREEN}Mật khẩu ngẫu nhiên được tạo: $PANEL_PW${NC}"
     else
         while [ ${#PANEL_PW} -lt 6 ]; do
             echo -e "${RED}Mật khẩu quá ngắn, vui lòng nhập lại (Tối thiểu 6 ký tự):${NC}"
-            read -r -s PANEL_PW
+            read -r -s PANEL_PW < /dev/tty
+            echo
         done
     fi
 fi
