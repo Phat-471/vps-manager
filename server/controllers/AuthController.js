@@ -239,8 +239,6 @@ function getEncryptionKey(req, res) {
     }
 }
 
-}
-
 /**
  * Đổi mật khẩu Panel
  */
