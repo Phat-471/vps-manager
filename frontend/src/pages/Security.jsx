@@ -97,6 +97,12 @@ export default function Security() {
   const [scanTime, setScanTime] = useState(null);
   const [actionLoading, setActionLoading] = useState({});
 
+  // Tab 8: Change Panel Password State
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [pwLoading, setPwLoading] = useState(false);
+
   useEffect(() => {
     if (activeTab === 'firewall' || activeTab === 'fail2ban') {
       fetchSecurityStatus();
@@ -514,6 +520,42 @@ export default function Security() {
     }
   };
 
+  const handleChangePanelPassword = async (e) => {
+    e.preventDefault();
+    if (!currentPw.trim() || !newPw.trim() || !confirmPw.trim()) return;
+
+    if (newPw !== confirmPw) {
+      showToast('Mật khẩu xác nhận không khớp', 'warning');
+      return;
+    }
+
+    if (newPw.length < 6) {
+      showToast('Mật khẩu mới phải từ 6 ký tự trở lên', 'warning');
+      return;
+    }
+
+    setPwLoading(true);
+    try {
+      const res = await apiCall('/api/auth/change-password', 'POST', {
+        currentPassword: currentPw,
+        newPassword: newPw
+      });
+      if (res.success) {
+        showToast(res.message || 'Thay đổi mật khẩu Panel thành công!', 'success');
+        if (res.token) {
+          localStorage.setItem('vps_panel_token', res.token);
+        }
+        setCurrentPw('');
+        setNewPw('');
+        setConfirmPw('');
+      }
+    } catch (err) {
+      showToast(err.message || 'Đổi mật khẩu thất bại', 'error');
+    } finally {
+      setPwLoading(false);
+    }
+  };
+
   const fetchBlacklistIPs = async () => {
     setBlacklistLoading(true);
     try {
@@ -632,6 +674,13 @@ export default function Security() {
         >
           <Bug size={16} className="text-red-400" />
           Quét Mã Độc
+        </button>
+        <button 
+          onClick={() => setActiveTab('password')}
+          className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === 'password' ? 'active bg-indigo-500/20 text-indigo-300' : 'text-gray-400 hover:text-white'}`}
+        >
+          <Lock size={16} className="text-indigo-400" />
+          Mật khẩu Panel
         </button>
       </div>
 
@@ -1810,6 +1859,60 @@ export default function Security() {
           </div>
         );
       })()}
+
+      {/* TAB 8: Change Panel Password */}
+      {activeTab === 'password' && (
+        <div className="card-glass p-6 rounded-xl max-w-md mx-auto space-y-4">
+          <h3 className="font-semibold text-lg flex items-center gap-2">
+            <Lock size={18} className="text-indigo-400" />
+            Đổi mật khẩu truy cập Panel
+          </h3>
+          <p className="text-sm text-gray-400 leading-relaxed">
+            Thay đổi mật khẩu bảo mật dùng để đăng nhập vào Bảng điều khiển VPS Manager Panel này.
+          </p>
+          <form onSubmit={handleChangePanelPassword} className="space-y-4" style={{ marginTop: '20px' }}>
+            <div className="form-group text-left">
+              <label className="text-xs text-gray-400 block mb-1">Mật khẩu hiện tại</label>
+              <input
+                type="password"
+                required
+                placeholder="Nhập mật khẩu hiện tại"
+                value={currentPw}
+                onChange={(e) => setCurrentPw(e.target.value)}
+                className="input-glass w-full"
+                style={{ padding: '10px', width: '100%' }}
+              />
+            </div>
+            <div className="form-group text-left">
+              <label className="text-xs text-gray-400 block mb-1">Mật khẩu mới (Tối thiểu 6 ký tự)</label>
+              <input
+                type="password"
+                required
+                placeholder="Nhập mật khẩu mới"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                className="input-glass w-full"
+                style={{ padding: '10px', width: '100%' }}
+              />
+            </div>
+            <div className="form-group text-left">
+              <label className="text-xs text-gray-400 block mb-1">Xác nhận mật khẩu mới</label>
+              <input
+                type="password"
+                required
+                placeholder="Nhập lại mật khẩu mới"
+                value={confirmPw}
+                onChange={(e) => setConfirmPw(e.target.value)}
+                className="input-glass w-full"
+                style={{ padding: '10px', width: '100%' }}
+              />
+            </div>
+            <button type="submit" disabled={pwLoading} className="btn btn-primary btn-block flex items-center justify-center gap-2" style={{ padding: '12px', width: '100%', marginTop: '8px' }}>
+              {pwLoading ? <RefreshCw size={16} className="animate-spin" /> : 'Lưu và Đổi mật khẩu'}
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

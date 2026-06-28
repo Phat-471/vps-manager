@@ -6,5 +6,6 @@ router.post('/status', AuthController.checkStatus);
 router.post('/login', AuthController.login);
 router.post('/setup', AuthController.setup);
 router.post('/encryption-key', AuthController.getEncryptionKey);
+router.post('/change-password', AuthController.changePassword);
 
 module.exports = router;

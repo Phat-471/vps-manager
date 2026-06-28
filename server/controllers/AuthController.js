@@ -239,11 +239,71 @@ function getEncryptionKey(req, res) {
     }
 }
 
+}
+
+/**
+ * Đổi mật khẩu Panel
+ */
+function changePassword(req, res) {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const fs = require('fs');
+        const path = require('path');
+
+        if (!process.env.PANEL_PASSWORD) {
+            return res.status(400).json({ success: false, error: 'Chưa thiết lập mật khẩu bảo mật trước đó.' });
+        }
+
+        if (!verifyPassword(currentPassword, process.env.PANEL_PASSWORD)) {
+            return res.status(400).json({ success: false, error: 'Mật khẩu hiện tại không chính xác' });
+        }
+
+        if (!newPassword || newPassword.trim().length < 6) {
+            return res.status(400).json({ success: false, error: 'Mật khẩu mới phải tối thiểu từ 6 ký tự trở lên' });
+        }
+
+        const hashedPassword = hashPassword(newPassword.trim());
+
+        // Ghi mật khẩu vào file .env
+        const envPath = path.join(__dirname, '../../.env');
+        let envContent = '';
+        if (fs.existsSync(envPath)) {
+            envContent = fs.readFileSync(envPath, 'utf8');
+        }
+
+        const lines = envContent.split('\n');
+        let found = false;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.startsWith('PANEL_PASSWORD=')) {
+                lines[i] = `PANEL_PASSWORD=${hashedPassword}`;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            lines.push(`PANEL_PASSWORD=${hashedPassword}`);
+        }
+        
+        fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
+        process.env.PANEL_PASSWORD = hashedPassword;
+
+        logActivity('Đổi mật khẩu Panel', 'Thay đổi mật khẩu Panel thành công');
+        
+        // Tạo token mới cho phiên làm việc hiện tại để duy trì đăng nhập
+        const token = generateToken();
+        res.json({ success: true, message: 'Đổi mật khẩu Panel thành công', token });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     checkStatus,
     login,
     setup,
     verifyToken,
-    getEncryptionKey
+    getEncryptionKey,
+    changePassword
 };
 
