@@ -15,6 +15,9 @@ import {
 } from 'lucide-react';
 
 const SCRIPT_LIST = [
+  // Cứu hộ khẩn cấp
+  { id: 'kill_miner', name: 'Diệt mã độc đào coin (Khẩn cấp)', icon: ShieldAlert, color: '#ef4444', desc: 'Quét và diệt nhanh các tiến trình đào tiền ảo chạy ngầm (crond giả mạo, kthreaddadd64), xóa cấu hình tự kích hoạt độc hại và khởi động lại dịch vụ SSH.' },
+
   // Tối ưu hóa hệ thống
   { id: 'bbr', name: 'Tối ưu Google BBR', icon: Gauge, color: '#e91e63', desc: 'Nâng cao tốc độ mạng và giảm độ trễ (latency) cho server bằng thuật toán BBR.' },
   { id: 'swap', name: 'Tạo RAM ảo (Swap)', icon: HardDrive, color: '#2196f3', desc: 'Tạo phân vùng Swap giúp server tránh bị crash khi hết bộ nhớ RAM thật (Tạo 2GB).' },

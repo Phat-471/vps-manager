@@ -72,45 +72,69 @@ else
 fi
 
 echo -e "${YELLOW}4. Thiết lập cấu hình mạng & mật khẩu bảo vệ Panel...${NC}"
-# Tìm một port ngẫu nhiên chưa sử dụng từ 10000 - 65000
-echo -e "Đang quét cổng (port) trống trên hệ thống..."
-while true; do
-    RANDOM_PORT=$((10000 + RANDOM % 55000))
-    PORT_IN_USE=0
-    if command -v ss &>/dev/null; then
-        if ss -tuln 2>/dev/null | grep -q -E ":$RANDOM_PORT\b|:$RANDOM_PORT$" || ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT "; then
-            PORT_IN_USE=1
-        fi
-    else
-        HEX_PORT=$(printf '%04X' $RANDOM_PORT)
-        if grep -q -i ":$HEX_PORT " /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
-            PORT_IN_USE=1
-        fi
-    fi
-    if [ "$PORT_IN_USE" -eq 0 ]; then
-        break
-    fi
-done
 
-echo -e "Chúng tôi đề xuất chạy Panel trên cổng ngẫu nhiên bảo mật: ${GREEN}$RANDOM_PORT${NC}"
-echo -e "Nhập cổng bạn muốn sử dụng (Bấm Enter để dùng cổng đề xuất: $RANDOM_PORT):"
-read -r INPUT_PORT
-if [ -n "$INPUT_PORT" ] && [[ "$INPUT_PORT" =~ ^[0-9]+$ ]]; then
-    PORT="$INPUT_PORT"
-else
-    PORT="$RANDOM_PORT"
+EXISTING_PORT=""
+EXISTING_PW=""
+REUSE_CONFIG="n"
+
+if [ -f /var/www/vps-manager/.env ]; then
+    EXISTING_PORT=$(grep -E "^PORT=" /var/www/vps-manager/.env | cut -d'=' -f2)
+    EXISTING_PW=$(grep -E "^PANEL_PASSWORD=" /var/www/vps-manager/.env | cut -d'=' -f2)
+    if [ -n "$EXISTING_PORT" ] && [ -n "$EXISTING_PW" ]; then
+        echo -e "${YELLOW}>> Phát hiện cấu hình cũ (Port: $EXISTING_PORT).${NC}"
+        echo -n "Bạn có muốn giữ nguyên Port và Mật khẩu Panel cũ không? (y/n, mặc định y): "
+        read -r REUSE_DECISION
+        if [ -z "$REUSE_DECISION" ] || [ "$REUSE_DECISION" = "y" ] || [ "$REUSE_DECISION" = "Y" ]; then
+            REUSE_CONFIG="y"
+        fi
+    fi
 fi
 
-echo -e "Nhập mật khẩu Panel bạn muốn đặt (Tối thiểu 6 ký tự, nhập ẩn, bấm Enter để tự động tạo):"
-read -r -s PANEL_PW
-if [ -z "$PANEL_PW" ]; then
-    PANEL_PW=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
-    echo -e "${GREEN}Mật khẩu ngẫu nhiên được tạo tự động: $PANEL_PW${NC}"
+if [ "$REUSE_CONFIG" = "y" ]; then
+    PORT="$EXISTING_PORT"
+    PANEL_PW="$EXISTING_PW"
+    echo -e "${GREEN}>> Sử dụng lại cấu hình cũ thành công!${NC}"
 else
-    while [ ${#PANEL_PW} -lt 6 ]; do
-        echo -e "${RED}Mật khẩu quá ngắn, vui lòng nhập lại (Tối thiểu 6 ký tự):${NC}"
-        read -r -s PANEL_PW
+    # Tìm một port ngẫu nhiên chưa sử dụng từ 10000 - 65000
+    echo -e "Đang quét cổng (port) trống trên hệ thống..."
+    while true; do
+        RANDOM_PORT=$((10000 + RANDOM % 55000))
+        PORT_IN_USE=0
+        if command -v ss &>/dev/null; then
+            if ss -tuln 2>/dev/null | grep -q -E ":$RANDOM_PORT\b|:$RANDOM_PORT$" || ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT "; then
+                PORT_IN_USE=1
+            fi
+        else
+            HEX_PORT=$(printf '%04X' $RANDOM_PORT)
+            if grep -q -i ":$HEX_PORT " /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
+                PORT_IN_USE=1
+            fi
+        fi
+        if [ "$PORT_IN_USE" -eq 0 ]; then
+            break
+        fi
     done
+
+    echo -e "Chúng tôi đề xuất chạy Panel trên cổng ngẫu nhiên bảo mật: ${GREEN}$RANDOM_PORT${NC}"
+    echo -e "Nhập cổng bạn muốn sử dụng (Bấm Enter để dùng cổng đề xuất: $RANDOM_PORT):"
+    read -r INPUT_PORT
+    if [ -n "$INPUT_PORT" ] && [[ "$INPUT_PORT" =~ ^[0-9]+$ ]]; then
+        PORT="$INPUT_PORT"
+    else
+        PORT="$RANDOM_PORT"
+    fi
+
+    echo -e "Nhập mật khẩu Panel bạn muốn đặt (Tối thiểu 6 ký tự, nhập ẩn, bấm Enter để tự động tạo):"
+    read -r -s PANEL_PW
+    if [ -z "$PANEL_PW" ]; then
+        PANEL_PW=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
+        echo -e "${GREEN}Mật khẩu ngẫu nhiên được tạo tự động: $PANEL_PW${NC}"
+    else
+        while [ ${#PANEL_PW} -lt 6 ]; do
+            echo -e "${RED}Mật khẩu quá ngắn, vui lòng nhập lại (Tối thiểu 6 ký tự):${NC}"
+            read -r -s PANEL_PW
+        done
+    fi
 fi
 
 # Ghi cấu hình vào .env trong thư mục làm việc

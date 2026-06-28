@@ -1,72 +1,59 @@
 #!/bin/bash
-# Script cập nhật Web Panel trung tâm (hoangphat.site)
-# Chạy trên chính máy chủ web khi cần cập nhật
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+echo -e "${BLUE}== CẬP NHẬT WEB PANEL TRUNG TÂM ==${NC}"
 
-WEB_DIR="/var/www/html"  # Thư mục web root (thay đổi nếu khác)
-
-echo -e "${BLUE}==================================================${NC}"
-echo -e "${GREEN}    CẬP NHẬT WEB PANEL TRUNG TÂM TỪ GIT         ${NC}"
-echo -e "${BLUE}==================================================${NC}"
-
-if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}Lỗi: Vui lòng chạy script này dưới quyền root (sudo bash).${NC}"
-  exit 1
-fi
-
-# Backup config.php và data/ trước khi cập nhật
-echo -e "${YELLOW}1. Backup cấu hình và dữ liệu quan trọng...${NC}"
-cp -f "$WEB_DIR/config.php" /tmp/config.php.bak 2>/dev/null && echo -e "${GREEN}  Đã backup config.php${NC}" || echo -e "${YELLOW}  Không tìm thấy config.php cũ (bỏ qua)${NC}"
-
-if [ -d "$WEB_DIR/data" ]; then
-    cp -rf "$WEB_DIR/data" /tmp/web-data-bak 2>/dev/null
-    echo -e "${GREEN}  Đã backup thư mục data/${NC}"
-fi
-
-# Kiểm tra git hoặc tải trực tiếp
-echo -e "${YELLOW}2. Đang cập nhật mã nguồn web...${NC}"
-if [ -d "$WEB_DIR/.git" ]; then
-    cd "$WEB_DIR" || exit
-    git fetch --all
-    git reset --hard origin/main
-    git pull origin main
-    echo -e "${GREEN}  Đã cập nhật từ Git thành công!${NC}"
-else
-    echo -e "${YELLOW}  Không phát hiện Git repo. Đang tải từ GitHub...${NC}"
-    TMP_DIR=$(mktemp -d)
-    git clone --depth=1 https://github.com/Phat-471/vps-manager.git "$TMP_DIR"
-    
-    # Chỉ copy thư mục web/
-    if [ -d "$TMP_DIR/web" ]; then
-        # Giữ lại config.php và data/
-        cp -rf "$TMP_DIR/web/"* "$WEB_DIR/"
-        echo -e "${GREEN}  Đã copy mã nguồn web mới thành công!${NC}"
+# Tìm thư mục web root
+WEB_DIR=""
+for d in /var/www/html /var/www /var/www/html/web; do
+    if [ -f "$d/stats.php" ] || [ -f "$d/index.php" ]; then
+        WEB_DIR="$d"
+        break
     fi
-    rm -rf "$TMP_DIR"
+done
+
+if [ -z "$WEB_DIR" ]; then
+    echo -e "${RED}Không tìm thấy thư mục web. Vui lòng nhập đường dẫn:${NC}"
+    read -r WEB_DIR
 fi
 
-# Khôi phục config.php và data/
-echo -e "${YELLOW}3. Khôi phục cấu hình và dữ liệu...${NC}"
-if [ -f /tmp/config.php.bak ]; then
-    cp -f /tmp/config.php.bak "$WEB_DIR/config.php"
-    echo -e "${GREEN}  Đã khôi phục config.php${NC}"
+echo -e "${YELLOW}Thư mục web: $WEB_DIR${NC}"
+
+# Backup config và data
+[ -f "$WEB_DIR/config.php" ] && cp "$WEB_DIR/config.php" /tmp/config.php.bak && echo "✅ Backup config.php"
+[ -d "$WEB_DIR/data" ] && cp -rf "$WEB_DIR/data" /tmp/web-data-bak && echo "✅ Backup data/"
+
+# Tải source mới từ GitHub
+echo -e "${YELLOW}Đang tải mã nguồn mới từ GitHub...${NC}"
+TMP_ZIP="/tmp/vps-web-update.zip"
+curl -sSL "https://github.com/Phat-471/vps-manager/archive/refs/heads/main.zip" -o "$TMP_ZIP"
+
+if [ ! -f "$TMP_ZIP" ] || [ ! -s "$TMP_ZIP" ]; then
+    echo -e "${RED}Lỗi: Không tải được ZIP từ GitHub!${NC}"; exit 1
 fi
 
-if [ -d /tmp/web-data-bak ]; then
-    cp -rf /tmp/web-data-bak "$WEB_DIR/data"
-    echo -e "${GREEN}  Đã khôi phục thư mục data/${NC}"
+TMP_DIR="/tmp/vps-update-src"
+rm -rf "$TMP_DIR"; mkdir -p "$TMP_DIR"
+unzip -q "$TMP_ZIP" -d "$TMP_DIR"
+rm -f "$TMP_ZIP"
+
+# Copy thư mục web/ vào WEB_DIR
+SRC_WEB=$(find "$TMP_DIR" -maxdepth 2 -name "stats.php" -exec dirname {} \; | head -n1)
+if [ -z "$SRC_WEB" ]; then
+    echo -e "${RED}Lỗi: Không tìm thấy thư mục web trong ZIP!${NC}"; exit 1
 fi
 
-# Phân quyền
+echo -e "${YELLOW}Đang copy file mới vào $WEB_DIR ...${NC}"
+cp -f "$SRC_WEB/"*.php "$WEB_DIR/" 2>/dev/null
+cp -f "$SRC_WEB/"*.sh "$WEB_DIR/" 2>/dev/null
+cp -f "$SRC_WEB/"*.zip "$WEB_DIR/" 2>/dev/null
+rm -rf "$TMP_DIR"
+
+# Khôi phục config và data
+[ -f /tmp/config.php.bak ] && cp /tmp/config.php.bak "$WEB_DIR/config.php" && echo "✅ Khôi phục config.php"
+[ -d /tmp/web-data-bak ] && cp -rf /tmp/web-data-bak "$WEB_DIR/data" && echo "✅ Khôi phục data/"
+
 chown -R www-data:www-data "$WEB_DIR" 2>/dev/null || true
 chmod -R 755 "$WEB_DIR"
-chmod 600 "$WEB_DIR/config.php" 2>/dev/null || true
 
-echo -e "${BLUE}==================================================${NC}"
-echo -e "${GREEN}      CẬP NHẬT WEB PANEL HOÀN TẤT!              ${NC}"
-echo -e "${BLUE}==================================================${NC}"
+echo -e "${GREEN}== CẬP NHẬT HOÀN TẤT! ==${NC}"

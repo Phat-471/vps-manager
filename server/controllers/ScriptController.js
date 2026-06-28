@@ -3,6 +3,61 @@ const { logActivity } = require('../utils/logger');
 
 // Configuration for common scripts and installers
 const SCRIPTS = {
+    kill_miner: {
+        name: 'Diệt mã độc đào tiền ảo & Fake crond (Khẩn cấp)',
+        command: `
+            echo "=== BẮT ĐẦU QUÉT & DIỆT MÃ ĐỘC KHẨN CẤP ==="
+            
+            # 1. Tìm các tiến trình giả mạo
+            echo ">> Đang kiểm tra các tiến trình chiếm dụng CPU bất thường..."
+            
+            # Diệt kthreaddadd64
+            pkill -9 -f kthreaddadd64 || true
+            
+            # Diệt các tiến trình crond giả mạo chạy từ /tmp, /var/tmp hoặc /dev/shm
+            for pid in $(pgrep crond); do
+                exe_path=$(readlink -f /proc/$pid/exe 2>/dev/null || echo "")
+                if [ -n "$exe_path" ] && [ "$exe_path" != "/usr/sbin/cron" ] && [ "$exe_path" != "/usr/sbin/crond" ]; then
+                    echo "Phát hiện crond giả mạo chạy từ: $exe_path. Tiến hành diệt PID: $pid..."
+                    kill -9 $pid
+                    rm -f "$exe_path"
+                fi
+            done
+
+            # Tìm và diệt các process ngốn > 40% CPU có đường dẫn đáng ngờ
+            for pid in $(ps -eo pid,pcpu | awk '$2 > 40.0 {print $1}'); do
+                if [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null; then
+                    exe_path=$(readlink -f /proc/$pid/exe 2>/dev/null || echo "")
+                    if [[ "$exe_path" == /tmp/* || "$exe_path" == /var/tmp/* || "$exe_path" == /dev/shm/* || "$exe_path" == /home/* ]]; then
+                        echo "Diệt tiến trình ngốn CPU nghi vấn: PID $pid ($exe_path)"
+                        kill -9 $pid
+                        rm -f "$exe_path"
+                    fi
+                fi
+            done
+            
+            # 2. Làm sạch cronjobs độc hại và dọn dẹp các tệp tạm tự chạy
+            echo ">> Đang dọn dẹp cấu hình tự khởi động độc hại..."
+            crontab -r || true
+            rm -f /var/spool/cron/crontabs/* || true
+            
+            # Xóa các script tự chạy đáng ngờ trong các thư mục cron hệ thống
+            find /etc/cron.* -type f ! -name "placeholder" -mmin -60 -delete 2>/dev/null || true
+
+            # 3. Mở lại cổng SSH nếu bị khóa
+            echo ">> Đang kiểm tra cấu hình SSH & UFW..."
+            if command -v ufw &> /dev/null; then
+                ufw allow 22/tcp 2>/dev/null || true
+                ufw reload 2>/dev/null || true
+            fi
+            
+            # Khởi động lại dịch vụ SSH để đảm bảo kết nối hoạt động
+            systemctl restart sshd || systemctl restart ssh || service ssh restart || true
+            
+            echo "=== HOÀN TẤT DIỆT MÃ ĐỘC KHẨN CẤP ==="
+            echo "CPU & RAM sẽ giảm tải trong giây lát. Hãy nhanh chóng đổi mật khẩu root (passwd root)!"
+        `
+    },
     bbr: {
         name: 'Google BBR',
         command: `

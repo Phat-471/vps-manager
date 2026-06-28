@@ -149,29 +149,38 @@ report_status() {
 }
 
 # Kiểm tra nếu đã cài đặt VPS Manager từ trước
+UPGRADE_MODE="n"
 if [ -d /var/www/vps-manager ]; then
     echo -e "${YELLOW}Cảnh báo: VPS Manager đã được cài đặt trên hệ thống này (/var/www/vps-manager).${NC}"
-    echo -e "${RED}CÀI ĐẶT LẠI SẼ XÓA SẠCH TOÀN BỘ DỮ LIỆU HIỆN CÓ CỦA PANEL!${NC}"
-    echo -n "Bạn có chắc chắn muốn xóa sạch dữ liệu cũ và tiến hành cài đặt lại không? (y/n): "
+    echo -e "Lựa chọn:"
+    echo -e "  [1] Nâng cấp (Upgrade): Giữ nguyên cấu hình (.env) và dữ liệu (uploads/)."
+    echo -e "  [2] Cài đặt sạch (Clean Reinstall): Xóa sạch toàn bộ dữ liệu cũ và cài lại."
+    echo -e "  [3] Hủy bỏ (Cancel)."
+    echo -n "Nhập lựa chọn của bạn (1-3, mặc định 1): "
     if [ -t 0 ]; then
-        read -r CONFIRM_REINSTALL
+        read -r UPDATE_CHOICE
     elif [ -c /dev/tty ]; then
-        read -r CONFIRM_REINSTALL </dev/tty
+        read -r UPDATE_CHOICE </dev/tty
     else
-        CONFIRM_REINSTALL="n"
+        UPDATE_CHOICE="1"
     fi
     
-    if [ "$CONFIRM_REINSTALL" != "y" ] && [ "$CONFIRM_REINSTALL" != "Y" ]; then
-        echo -e "${BLUE}Đã hủy quá trình cài đặt lại theo yêu cầu của bạn.${NC}"
+    if [ -z "$UPDATE_CHOICE" ] || [ "$UPDATE_CHOICE" = "1" ]; then
+        echo -e "${GREEN}>> Đã chọn chế độ: NÂNG CẤP HỆ THỐNG (Bảo toàn dữ liệu)${NC}"
+        UPGRADE_MODE="y"
+    elif [ "$UPDATE_CHOICE" = "2" ]; then
+        echo -e "${RED}>> Đã chọn chế độ: CÀI ĐẶT SẠCH (Xóa toàn bộ cấu hình & dữ liệu)${NC}"
+        echo -e "${YELLOW}Đang gỡ bỏ cấu hình và dữ liệu cũ...${NC}"
+        # Gỡ PM2 process cũ
+        pm2 delete vps-manager 2>/dev/null || true
+        pm2 save --force 2>/dev/null || pm2 save 2>/dev/null || true
+        # Xóa thư mục nguồn cũ
+        rm -rf /var/www/vps-manager
+        echo -e "${GREEN}Đã xóa sạch dữ liệu cũ. Bắt đầu cài đặt mới...${NC}"
+    else
+        echo -e "${BLUE}Đã hủy quá trình theo yêu cầu của bạn.${NC}"
         exit 0
     fi
-    echo -e "${YELLOW}Đang gỡ bỏ cấu hình và dữ liệu cũ...${NC}"
-    # Gỡ PM2 process cũ
-    pm2 delete vps-manager 2>/dev/null || true
-    pm2 save --force 2>/dev/null || pm2 save 2>/dev/null || true
-    # Xóa thư mục nguồn cũ
-    rm -rf /var/www/vps-manager
-    echo -e "${GREEN}Đã xóa sạch dữ liệu cũ. Bắt đầu cài đặt mới...${NC}"
 fi
 
 # Báo cáo bắt đầu cài đặt
@@ -230,6 +239,13 @@ else
 fi
 
 echo -e "${YELLOW}4. Đang cài đặt mã nguồn VPS Manager...${NC}"
+if [ "$UPGRADE_MODE" = "y" ]; then
+    echo -e "${YELLOW}>> Đang sao lưu cấu hình và dữ liệu cũ...${NC}"
+    mkdir -p /tmp/vps_manager_bak
+    [ -f /var/www/vps-manager/.env ] && cp /var/www/vps-manager/.env /tmp/vps_manager_bak/.env
+    [ -d /var/www/vps-manager/uploads ] && cp -rf /var/www/vps-manager/uploads /tmp/vps_manager_bak/uploads
+fi
+
 rm -rf /var/www/vps-manager
 mkdir -p /var/www/vps-manager
 
@@ -260,6 +276,13 @@ if [ "$DOWNLOAD_SUCCESS" -eq 0 ] || [ ! -f /var/www/vps-manager/package.json ]; 
     exit 1
 fi
 
+if [ "$UPGRADE_MODE" = "y" ]; then
+    echo -e "${YELLOW}>> Đang khôi phục cấu hình và dữ liệu...${NC}"
+    [ -f /tmp/vps_manager_bak/.env ] && cp /tmp/vps_manager_bak/.env /var/www/vps-manager/.env
+    [ -d /tmp/vps_manager_bak/uploads ] && cp -rf /tmp/vps_manager_bak/uploads/. /var/www/vps-manager/uploads/ 2>/dev/null
+    rm -rf /tmp/vps_manager_bak
+fi
+
 cd /var/www/vps-manager || exit
 
 echo -e "${YELLOW}5. Đang cài đặt thư viện Backend (Chỉ các thư viện chạy trực tiếp)...${NC}"
@@ -267,71 +290,77 @@ npm install --omit=dev
 
 echo -e "${YELLOW}6. Giao diện Frontend đã được biên dịch sẵn trong thư mục public/...${NC}"
 
-echo -e "${YELLOW}7. Thiết lập cấu hình mạng & mật khẩu bảo vệ Panel...${NC}"
-# Tìm một port ngẫu nhiên chưa sử dụng từ 10000 - 65000
-echo -e "Đang quét cổng (port) trống trên hệ thống..."
-while true; do
-    RANDOM_PORT=$((10000 + RANDOM % 55000))
-    PORT_IN_USE=0
-    if command -v ss &>/dev/null; then
-        if ss -tuln 2>/dev/null | grep -q -E ":$RANDOM_PORT\b|:$RANDOM_PORT$" || ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT "; then
-            PORT_IN_USE=1
-        fi
-    else
-        HEX_PORT=$(printf '%04X' $RANDOM_PORT)
-        if grep -q -i ":$HEX_PORT " /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
-            PORT_IN_USE=1
-        fi
-    fi
-    if [ "$PORT_IN_USE" -eq 0 ]; then
-        break
-    fi
-done
-
-echo -e "Chúng tôi đề xuất chạy Panel trên cổng ngẫu nhiên bảo mật: ${GREEN}$RANDOM_PORT${NC}"
-echo -e "Nhập cổng bạn muốn sử dụng (Bấm Enter để dùng cổng đề xuất: $RANDOM_PORT):"
-if [ -t 0 ]; then
-    read -r INPUT_PORT
-elif [ -c /dev/tty ]; then
-    read -r INPUT_PORT </dev/tty
+if [ "$UPGRADE_MODE" = "y" ] && [ -f /var/www/vps-manager/.env ]; then
+    PORT=$(grep -E "^PORT=" /var/www/vps-manager/.env | cut -d'=' -f2)
+    PANEL_PW=$(grep -E "^PANEL_PASSWORD=" /var/www/vps-manager/.env | cut -d'=' -f2)
+    echo -e "${GREEN}>> Đã sử dụng lại cấu hình cũ (Port: $PORT).${NC}"
 else
-    INPUT_PORT=""
-fi
-if [ -n "$INPUT_PORT" ] && [[ "$INPUT_PORT" =~ ^[0-9]+$ ]]; then
-    PORT="$INPUT_PORT"
-else
-    PORT="$RANDOM_PORT"
-fi
-
-echo -e "Nhập mật khẩu Panel bạn muốn đặt (Tối thiểu 6 ký tự, nhập ẩn, bấm Enter để tự động tạo):"
-if [ -t 0 ]; then
-    read -r -s PANEL_PW
-elif [ -c /dev/tty ]; then
-    read -r -s PANEL_PW </dev/tty
-else
-    PANEL_PW=""
-fi
-if [ -z "$PANEL_PW" ]; then
-    # Tạo mật khẩu ngẫu nhiên 12 ký tự an toàn
-    PANEL_PW=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
-    echo -e "${GREEN}Mật khẩu ngẫu nhiên được tạo tự động: $PANEL_PW${NC}"
-else
-    while [ ${#PANEL_PW} -lt 6 ]; do
-        echo -e "${RED}Mật khẩu quá ngắn, vui lòng nhập lại (Tối thiểu 6 ký tự):${NC}"
-        if [ -t 0 ]; then
-            read -r -s PANEL_PW
-        elif [ -c /dev/tty ]; then
-            read -r -s PANEL_PW </dev/tty
+    echo -e "${YELLOW}7. Thiết lập cấu hình mạng & mật khẩu bảo vệ Panel...${NC}"
+    # Tìm một port ngẫu nhiên chưa sử dụng từ 10000 - 65000
+    echo -e "Đang quét cổng (port) trống trên hệ thống..."
+    while true; do
+        RANDOM_PORT=$((10000 + RANDOM % 55000))
+        PORT_IN_USE=0
+        if command -v ss &>/dev/null; then
+            if ss -tuln 2>/dev/null | grep -q -E ":$RANDOM_PORT\b|:$RANDOM_PORT$" || ss -tuln 2>/dev/null | grep -q ":$RANDOM_PORT "; then
+                PORT_IN_USE=1
+            fi
         else
+            HEX_PORT=$(printf '%04X' $RANDOM_PORT)
+            if grep -q -i ":$HEX_PORT " /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
+                PORT_IN_USE=1
+            fi
+        fi
+        if [ "$PORT_IN_USE" -eq 0 ]; then
             break
         fi
     done
-fi
 
-# Ghi cấu hình vào .env
-echo "PANEL_PASSWORD=$PANEL_PW" > /var/www/vps-manager/.env
-echo "PORT=$PORT" >> /var/www/vps-manager/.env
-echo -e "${GREEN}Đã cấu hình cổng $PORT và mật khẩu Panel thành công!${NC}"
+    echo -e "Chúng tôi đề xuất chạy Panel trên cổng ngẫu nhiên bảo mật: ${GREEN}$RANDOM_PORT${NC}"
+    echo -e "Nhập cổng bạn muốn sử dụng (Bấm Enter để dùng cổng đề xuất: $RANDOM_PORT):"
+    if [ -t 0 ]; then
+        read -r INPUT_PORT
+    elif [ -c /dev/tty ]; then
+        read -r INPUT_PORT </dev/tty
+    else
+        INPUT_PORT=""
+    fi
+    if [ -n "$INPUT_PORT" ] && [[ "$INPUT_PORT" =~ ^[0-9]+$ ]]; then
+        PORT="$INPUT_PORT"
+    else
+        PORT="$RANDOM_PORT"
+    fi
+
+    echo -e "Nhập mật khẩu Panel bạn muốn đặt (Tối thiểu 6 ký tự, nhập ẩn, bấm Enter để tự động tạo):"
+    if [ -t 0 ]; then
+        read -r -s PANEL_PW
+    elif [ -c /dev/tty ]; then
+        read -r -s PANEL_PW </dev/tty
+    else
+        PANEL_PW=""
+    fi
+    if [ -z "$PANEL_PW" ]; then
+        # Tạo mật khẩu ngẫu nhiên 12 ký tự an toàn
+        PANEL_PW=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 12)
+        echo -e "${GREEN}Mật khẩu ngẫu nhiên được tạo tự động: $PANEL_PW${NC}"
+    else
+        while [ ${#PANEL_PW} -lt 6 ]; do
+            echo -e "${RED}Mật khẩu quá ngắn, vui lòng nhập lại (Tối thiểu 6 ký tự):${NC}"
+            if [ -t 0 ]; then
+                read -r -s PANEL_PW
+            elif [ -c /dev/tty ]; then
+                read -r -s PANEL_PW </dev/tty
+            else
+                break
+            fi
+        done
+    fi
+
+    # Ghi cấu hình vào .env
+    echo "PANEL_PASSWORD=$PANEL_PW" > /var/www/vps-manager/.env
+    echo "PORT=$PORT" >> /var/www/vps-manager/.env
+    echo -e "${GREEN}Đã cấu hình cổng $PORT và mật khẩu Panel thành công!${NC}"
+fi
 
 echo -e "${YELLOW}8. Cài đặt PM2 và thiết lập chạy nền (Tối ưu RAM tối đa)...${NC}"
 npm install -g pm2
