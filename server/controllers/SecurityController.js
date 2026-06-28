@@ -985,6 +985,165 @@ async function applyZones(req, res) {
     }
 }
 
+// ===================== THREAT SCANNER =====================
+
+const MINER_PROCESS_NAMES = [
+    'xmrig', 'xmr', 'minerd', 'cpuminer', 'kthreaddadd', 'kthreadd64',
+    'kdevtmpfsi', 'kinsing', 'cryptonight', 'monero', 'nanominer',
+    'ethminer', 'nbminer', 'teamredminer', 'phoenixminer', 't-rex'
+];
+const MINING_PORTS = ['3333','4444','5555','7777','8899','14444','45700','14433','3334','9999'];
+const MALICIOUS_CRON_PATTERNS = ['curl ', 'wget ', 'bash -i', 'python -c', 'python3 -c', '/tmp/', '/dev/shm/', 'base64 -d', 'chmod +x'];
+
+async function scanThreats(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+
+        const threats = { processes: [], cronjobs: [], network: [], files: [] };
+
+        // --- 1. Scan suspicious processes ---
+        const psRes = await ssh.executeCommand("ps aux --sort=-%cpu | head -30 | awk 'NR>1 {print $1,$2,$3,$4,$11,$12,$13}'");
+        if (psRes.code === 0) {
+            psRes.stdout.trim().split('\n').forEach(line => {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length < 5) return;
+                const [user, pid, cpu, mem, ...cmdParts] = parts;
+                const cmd = cmdParts.join(' ');
+                const cpuNum = parseFloat(cpu);
+                const isMinerName = MINER_PROCESS_NAMES.some(n => cmd.toLowerCase().includes(n));
+                const isInTmp = cmd.startsWith('/tmp/') || cmd.startsWith('/dev/shm/') || cmd.startsWith('/var/tmp/');
+                const isFakeCrond = cmd.includes('crond') && !cmd.startsWith('/usr/sbin/') && !cmd.startsWith('/sbin/');
+                const isHighCpu = cpuNum > 40;
+
+                let risk = 'normal';
+                let reason = '';
+                if (isMinerName) { risk = 'critical'; reason = 'Tên tiến trình khớp mã độc đào coin'; }
+                else if (isInTmp && isHighCpu) { risk = 'critical'; reason = 'Chạy từ thư mục tạm + CPU cao'; }
+                else if (isInTmp) { risk = 'high'; reason = 'Tiến trình chạy từ thư mục tạm (/tmp, /dev/shm)'; }
+                else if (isFakeCrond) { risk = 'critical'; reason = 'crond giả mạo chạy ngoài /usr/sbin/'; }
+                else if (isHighCpu && user === 'root' && !cmd.includes('node') && !cmd.includes('mysql') && !cmd.includes('nginx') && !cmd.includes('apache') && !cmd.includes('php')) {
+                    risk = 'medium'; reason = `CPU cao bất thường (${cpu}%) với quyền root`;
+                }
+
+                if (risk !== 'normal') {
+                    threats.processes.push({ pid, user, cpu, mem, cmd, risk, reason });
+                }
+            });
+        }
+
+        // --- 2. Scan malicious cronjobs ---
+        const cronSources = [
+            { cmd: 'cat /var/spool/cron/crontabs/root 2>/dev/null', source: '/var/spool/cron/crontabs/root' },
+            { cmd: 'cat /etc/crontab 2>/dev/null', source: '/etc/crontab' },
+            { cmd: 'cat /etc/cron.d/* 2>/dev/null', source: '/etc/cron.d/*' },
+        ];
+        for (const cronSrc of cronSources) {
+            const cronRes = await ssh.executeCommand(cronSrc.cmd);
+            if (cronRes.code === 0 && cronRes.stdout.trim()) {
+                cronRes.stdout.trim().split('\n').forEach((line, idx) => {
+                    const trimmed = line.trim();
+                    if (!trimmed || trimmed.startsWith('#')) return;
+                    const matchedPattern = MALICIOUS_CRON_PATTERNS.find(p => trimmed.includes(p));
+                    if (matchedPattern) {
+                        threats.cronjobs.push({
+                            source: cronSrc.source,
+                            line: trimmed,
+                            lineNum: idx + 1,
+                            risk: 'high',
+                            reason: `Lệnh nguy hiểm trong cronjob: "${matchedPattern}"`
+                        });
+                    }
+                });
+            }
+        }
+
+        // --- 3. Scan suspicious network connections ---
+        const netRes = await ssh.executeCommand("ss -tunp 2>/dev/null | tail -n +2");
+        if (netRes.code === 0) {
+            netRes.stdout.trim().split('\n').forEach(line => {
+                if (!line.trim()) return;
+                const isMiningPort = MINING_PORTS.some(port => line.includes(`:${port} `) || line.includes(`:${port}\t`));
+                if (isMiningPort) {
+                    const portMatch = MINING_PORTS.find(port => line.includes(`:${port}`));
+                    threats.network.push({
+                        line: line.trim(),
+                        risk: 'critical',
+                        reason: `Kết nối đến port mining đào coin: ${portMatch}`
+                    });
+                }
+            });
+        }
+
+        // --- 4. Scan executable files in temp dirs ---
+        const tmpRes = await ssh.executeCommand("find /tmp /var/tmp /dev/shm -maxdepth 2 -type f -executable 2>/dev/null");
+        if (tmpRes.code === 0 && tmpRes.stdout.trim()) {
+            tmpRes.stdout.trim().split('\n').forEach(filePath => {
+                if (!filePath.trim()) return;
+                threats.files.push({
+                    path: filePath.trim(),
+                    risk: 'high',
+                    reason: 'File thực thi trong thư mục tạm - dấu hiệu mã độc'
+                });
+            });
+        }
+
+        const totalThreats = threats.processes.length + threats.cronjobs.length + threats.network.length + threats.files.length;
+        res.json({ success: true, data: threats, totalThreats });
+
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function killThreatProcess(req, res) {
+    try {
+        const { vpsConfig, pid } = req.body;
+        const safePid = sanitizeNumber(String(pid));
+        if (!safePid) return res.status(400).json({ success: false, error: 'PID không hợp lệ' });
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const result = await ssh.executeCommand(`kill -9 ${safePid} 2>&1`);
+        res.json({ success: result.code === 0, message: result.code === 0 ? `Đã diệt tiến trình PID ${safePid}` : result.stderr });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function deleteThreatFile(req, res) {
+    try {
+        const { vpsConfig, path: filePath } = req.body;
+        // Safety: only allow deleting from /tmp, /var/tmp, /dev/shm
+        if (!filePath || !(/^\/(?:tmp|var\/tmp|dev\/shm)\//.test(filePath))) {
+            return res.status(400).json({ success: false, error: 'Đường dẫn không hợp lệ hoặc không được phép xóa' });
+        }
+        const safeFile = escapeShellArg(filePath);
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const result = await ssh.executeCommand(`rm -f ${safeFile} 2>&1`);
+        res.json({ success: result.code === 0, message: result.code === 0 ? `Đã xóa file: ${filePath}` : result.stderr });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function cleanMaliciousCron(req, res) {
+    try {
+        const { vpsConfig, source, lineNum } = req.body;
+        const allowedSources = ['/var/spool/cron/crontabs/root', '/etc/crontab'];
+        if (!allowedSources.includes(source)) {
+            return res.status(400).json({ success: false, error: 'Nguồn cronjob không hợp lệ' });
+        }
+        const safeNum = sanitizeNumber(String(lineNum));
+        if (!safeNum) return res.status(400).json({ success: false, error: 'Số dòng không hợp lệ' });
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const result = await ssh.executeCommand(`sed -i '${safeNum}d' ${source} 2>&1`);
+        res.json({ success: result.code === 0, message: result.code === 0 ? `Đã xóa dòng ${lineNum} trong ${source}` : result.stderr });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     getUFWStatus,
     enableUFW,
@@ -1009,5 +1168,10 @@ module.exports = {
     saveRawFail2BanConfig,
     unbanFail2BanIP,
     banFail2BanIP,
-    controlFail2BanService
+    controlFail2BanService,
+    scanThreats,
+    killThreatProcess,
+    deleteThreatFile,
+    cleanMaliciousCron
 };
+

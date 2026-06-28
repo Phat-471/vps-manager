@@ -13,7 +13,14 @@ import {
   Globe, 
   Activity, 
   Lock,
-  X
+  X,
+  Bug,
+  Cpu,
+  Network,
+  FileWarning,
+  Clock,
+  Zap,
+  CheckCircle
 } from 'lucide-react';
 
 const UFW_PRESETS = [
@@ -83,6 +90,12 @@ export default function Security() {
   const [zoneIps, setZoneIps] = useState('');
   const [zonePorts, setZonePorts] = useState('');
   const [zoneDescription, setZoneDescription] = useState('');
+
+  // Tab 7: Threat Scanner State
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+  const [scanTime, setScanTime] = useState(null);
+  const [actionLoading, setActionLoading] = useState({});
 
   useEffect(() => {
     if (activeTab === 'firewall' || activeTab === 'fail2ban') {
@@ -612,6 +625,13 @@ export default function Security() {
         >
           <Shield size={16} className="text-yellow-400" />
           Vùng bảo mật (Zones)
+        </button>
+        <button 
+          onClick={() => setActiveTab('scanner')}
+          className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === 'scanner' ? 'active bg-red-500/20 text-red-300' : 'text-gray-400 hover:text-white'}`}
+        >
+          <Bug size={16} className="text-red-400" />
+          Quét Mã Độc
         </button>
       </div>
 
@@ -1538,6 +1558,258 @@ export default function Security() {
           </div>
         </div>
       )}
+
+      {/* TAB 7: Threat Scanner */}
+      {activeTab === 'scanner' && (() => {
+        const RISK_STYLES = {
+          critical: { bg: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', badge: '#ef4444', label: '🔴 Nghiêm trọng' },
+          high:     { bg: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.3)', badge: '#f97316', label: '🟠 Nguy hiểm' },
+          medium:   { bg: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)', badge: '#eab308', label: '🟡 Cảnh báo' },
+        };
+
+        const handleScan = async () => {
+          setScanLoading(true);
+          setScanResult(null);
+          try {
+            const res = await apiCall('/api/security/scan/threats', 'POST');
+            if (res.success) {
+              setScanResult(res.data);
+              setScanTime(new Date().toLocaleTimeString('vi-VN'));
+              const total = res.totalThreats;
+              showToast(total === 0 ? '✅ Hệ thống sạch, không phát hiện mối đe dọa!' : `⚠️ Phát hiện ${total} mối đe dọa!`, total === 0 ? 'success' : 'error');
+            }
+          } catch (err) { showToast('Lỗi quét: ' + err.message, 'error'); }
+          finally { setScanLoading(false); }
+        };
+
+        const handleKill = async (pid) => {
+          setActionLoading(p => ({ ...p, [`kill_${pid}`]: true }));
+          try {
+            const res = await apiCall('/api/security/scan/kill', 'POST', { pid });
+            showToast(res.message || (res.success ? 'Đã diệt tiến trình!' : 'Thất bại'), res.success ? 'success' : 'error');
+            if (res.success) setScanResult(prev => ({ ...prev, processes: prev.processes.filter(p => p.pid !== pid) }));
+          } catch (err) { showToast(err.message, 'error'); }
+          finally { setActionLoading(p => ({ ...p, [`kill_${pid}`]: false })); }
+        };
+
+        const handleDeleteFile = async (path) => {
+          setActionLoading(p => ({ ...p, [`file_${path}`]: true }));
+          try {
+            const res = await apiCall('/api/security/scan/delete-file', 'POST', { path });
+            showToast(res.message || (res.success ? 'Đã xóa file!' : 'Thất bại'), res.success ? 'success' : 'error');
+            if (res.success) setScanResult(prev => ({ ...prev, files: prev.files.filter(f => f.path !== path) }));
+          } catch (err) { showToast(err.message, 'error'); }
+          finally { setActionLoading(p => ({ ...p, [`file_${path}`]: false })); }
+        };
+
+        const handleCleanCron = async (source, lineNum) => {
+          setActionLoading(p => ({ ...p, [`cron_${lineNum}`]: true }));
+          try {
+            const res = await apiCall('/api/security/scan/clean-cron', 'POST', { source, lineNum });
+            showToast(res.message || (res.success ? 'Đã xóa cronjob!' : 'Thất bại'), res.success ? 'success' : 'error');
+            if (res.success) setScanResult(prev => ({ ...prev, cronjobs: prev.cronjobs.filter(c => !(c.source === source && c.lineNum === lineNum)) }));
+          } catch (err) { showToast(err.message, 'error'); }
+          finally { setActionLoading(p => ({ ...p, [`cron_${lineNum}`]: false })); }
+        };
+
+        const totalThreats = scanResult ? (scanResult.processes.length + scanResult.cronjobs.length + scanResult.network.length + scanResult.files.length) : 0;
+
+        return (
+          <div className="space-y-6">
+            {/* Header Card */}
+            <div className="card-glass p-6 rounded-xl" style={{ background: 'linear-gradient(135deg, rgba(239,68,68,0.08), rgba(249,115,22,0.05))' }}>
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <Bug size={24} className="text-red-400" />
+                    <h2 className="text-xl font-bold">Bộ quét Mã Độc & Bot</h2>
+                    {scanResult && (
+                      <span className="status-badge" style={{ background: totalThreats > 0 ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)', color: totalThreats > 0 ? '#f87171' : '#34d399', border: `1px solid ${totalThreats > 0 ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)'}` }}>
+                        {totalThreats > 0 ? `⚠️ ${totalThreats} mối đe dọa` : '✅ Sạch'}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-400">Quét toàn diện tiến trình, cronjob, kết nối mạng và file thực thi để phát hiện mã độc đào coin, bot và backdoor.</p>
+                  {scanTime && <p className="text-xs text-gray-500 mt-1 flex items-center gap-1"><Clock size={12} /> Lần quét cuối: {scanTime}</p>}
+                </div>
+                <button
+                  onClick={handleScan}
+                  disabled={scanLoading}
+                  className="btn whitespace-nowrap"
+                  style={{ background: scanLoading ? 'rgba(239,68,68,0.3)' : 'linear-gradient(135deg, #ef4444, #dc2626)', color: 'white', padding: '12px 28px', fontWeight: 700, boxShadow: scanLoading ? 'none' : '0 4px 20px rgba(239,68,68,0.4)' }}
+                >
+                  {scanLoading ? (
+                    <><RefreshCw size={16} className="animate-spin" /> Đang quét...</>
+                  ) : (
+                    <><Zap size={16} /> Bắt đầu Quét ngay</>
+                  )}
+                </button>
+              </div>
+
+              {/* Stat summary */}
+              {scanResult && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5 pt-5 border-t border-white/10">
+                  {[
+                    { icon: <Cpu size={16} />, label: 'Tiến trình', count: scanResult.processes.length, color: '#ef4444' },
+                    { icon: <Clock size={16} />, label: 'Cronjob', count: scanResult.cronjobs.length, color: '#f97316' },
+                    { icon: <Network size={16} />, label: 'Kết nối mạng', count: scanResult.network.length, color: '#a855f7' },
+                    { icon: <FileWarning size={16} />, label: 'File thực thi', count: scanResult.files.length, color: '#eab308' },
+                  ].map((s, i) => (
+                    <div key={i} className="card-glass rounded-lg p-3 text-center">
+                      <div style={{ color: s.color, display: 'flex', justifyContent: 'center', marginBottom: 4 }}>{s.icon}</div>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: s.count > 0 ? s.color : '#34d399' }}>{s.count}</div>
+                      <div style={{ fontSize: 11, color: '#64748b' }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {!scanResult && !scanLoading && (
+              <div className="card-glass p-12 rounded-xl text-center">
+                <Bug size={48} className="text-gray-600 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-400 mb-2">Chưa có kết quả quét</h3>
+                <p className="text-sm text-gray-500">Nhấn <strong className="text-red-400">Bắt đầu Quét ngay</strong> để kiểm tra mối đe dọa trên VPS</p>
+              </div>
+            )}
+
+            {/* Results */}
+            {scanResult && (<>
+
+              {/* Processes */}
+              {scanResult.processes.length > 0 && (
+                <div className="card-glass p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-red-400"><Cpu size={18} /> Tiến trình đáng ngờ ({scanResult.processes.length})</h3>
+                  {scanResult.processes.map((p, i) => {
+                    const rs = RISK_STYLES[p.risk] || RISK_STYLES.medium;
+                    return (
+                      <div key={i} style={{ background: rs.bg, border: rs.border, borderRadius: 12, padding: '14px 16px' }}>
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span style={{ fontSize: 11, fontWeight: 700, color: rs.badge, background: `${rs.badge}20`, padding: '2px 8px', borderRadius: 20 }}>{rs.label}</span>
+                              <span className="font-mono text-xs text-gray-400">PID: {p.pid}</span>
+                              <span className="text-xs text-gray-400">CPU: <strong className="text-yellow-400">{p.cpu}%</strong></span>
+                              <span className="text-xs text-gray-400">RAM: {p.mem}%</span>
+                              <span className="text-xs text-gray-400">User: <strong className="text-blue-400">{p.user}</strong></span>
+                            </div>
+                            <p className="font-mono text-xs text-gray-300 break-all">{p.cmd}</p>
+                            <p className="text-xs text-gray-500 mt-1">⚠️ {p.reason}</p>
+                          </div>
+                          <button
+                            onClick={() => handleKill(p.pid)}
+                            disabled={actionLoading[`kill_${p.pid}`]}
+                            className="btn btn-danger whitespace-nowrap"
+                            style={{ padding: '7px 14px', fontSize: 12, flexShrink: 0 }}
+                          >
+                            {actionLoading[`kill_${p.pid}`] ? <RefreshCw size={12} className="animate-spin" /> : <X size={12} />}
+                            Diệt ngay
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Cronjobs */}
+              {scanResult.cronjobs.length > 0 && (
+                <div className="card-glass p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-orange-400"><Clock size={18} /> Cronjob độc hại ({scanResult.cronjobs.length})</h3>
+                  {scanResult.cronjobs.map((c, i) => {
+                    const rs = RISK_STYLES[c.risk] || RISK_STYLES.high;
+                    return (
+                      <div key={i} style={{ background: rs.bg, border: rs.border, borderRadius: 12, padding: '14px 16px' }}>
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span style={{ fontSize: 11, fontWeight: 700, color: rs.badge, background: `${rs.badge}20`, padding: '2px 8px', borderRadius: 20 }}>{rs.label}</span>
+                              <span className="text-xs text-gray-400 font-mono">{c.source}:{c.lineNum}</span>
+                            </div>
+                            <p className="font-mono text-xs text-gray-300 break-all">{c.line}</p>
+                            <p className="text-xs text-gray-500 mt-1">⚠️ {c.reason}</p>
+                          </div>
+                          {c.source !== '/etc/cron.d/*' && (
+                            <button
+                              onClick={() => handleCleanCron(c.source, c.lineNum)}
+                              disabled={actionLoading[`cron_${c.lineNum}`]}
+                              className="btn btn-danger whitespace-nowrap"
+                              style={{ padding: '7px 14px', fontSize: 12, flexShrink: 0 }}
+                            >
+                              {actionLoading[`cron_${c.lineNum}`] ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                              Xóa lệnh
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Network */}
+              {scanResult.network.length > 0 && (
+                <div className="card-glass p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-purple-400"><Network size={18} /> Kết nối mạng đáng ngờ ({scanResult.network.length})</h3>
+                  {scanResult.network.map((n, i) => {
+                    const rs = RISK_STYLES[n.risk] || RISK_STYLES.critical;
+                    return (
+                      <div key={i} style={{ background: rs.bg, border: rs.border, borderRadius: 12, padding: '14px 16px' }}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span style={{ fontSize: 11, fontWeight: 700, color: rs.badge, background: `${rs.badge}20`, padding: '2px 8px', borderRadius: 20 }}>{rs.label}</span>
+                        </div>
+                        <p className="font-mono text-xs text-gray-300 break-all">{n.line}</p>
+                        <p className="text-xs text-gray-500 mt-1">⚠️ {n.reason}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Files */}
+              {scanResult.files.length > 0 && (
+                <div className="card-glass p-5 rounded-xl space-y-3">
+                  <h3 className="font-bold flex items-center gap-2 text-yellow-400"><FileWarning size={18} /> File thực thi trong thư mục tạm ({scanResult.files.length})</h3>
+                  {scanResult.files.map((f, i) => {
+                    const rs = RISK_STYLES[f.risk] || RISK_STYLES.high;
+                    return (
+                      <div key={i} style={{ background: rs.bg, border: rs.border, borderRadius: 12, padding: '14px 16px' }}>
+                        <div className="flex items-start justify-between gap-3 flex-wrap">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span style={{ fontSize: 11, fontWeight: 700, color: rs.badge, background: `${rs.badge}20`, padding: '2px 8px', borderRadius: 20 }}>{rs.label}</span>
+                            </div>
+                            <p className="font-mono text-xs text-gray-300 break-all">{f.path}</p>
+                            <p className="text-xs text-gray-500 mt-1">⚠️ {f.reason}</p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteFile(f.path)}
+                            disabled={actionLoading[`file_${f.path}`]}
+                            className="btn btn-danger whitespace-nowrap"
+                            style={{ padding: '7px 14px', fontSize: 12, flexShrink: 0 }}
+                          >
+                            {actionLoading[`file_${f.path}`] ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                            Xóa file
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* All clear */}
+              {totalThreats === 0 && (
+                <div className="card-glass p-10 rounded-xl text-center">
+                  <CheckCircle size={48} className="text-green-400 mx-auto mb-3" />
+                  <h3 className="text-lg font-bold text-green-400 mb-1">Hệ thống sạch!</h3>
+                  <p className="text-sm text-gray-400">Không phát hiện tiến trình, cronjob, kết nối hoặc file độc hại nào.</p>
+                </div>
+              )}
+            </>)}
+          </div>
+        );
+      })()}
     </div>
   );
 }

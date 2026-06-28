@@ -29,4 +29,10 @@ router.post('/zones/save', SecurityController.saveZone);
 router.post('/zones/delete', SecurityController.deleteZone);
 router.post('/zones/apply', SecurityController.applyZones);
 
+// Threat scanner routes
+router.post('/scan/threats', SecurityController.scanThreats);
+router.post('/scan/kill', SecurityController.killThreatProcess);
+router.post('/scan/delete-file', SecurityController.deleteThreatFile);
+router.post('/scan/clean-cron', SecurityController.cleanMaliciousCron);
+
 module.exports = router;
