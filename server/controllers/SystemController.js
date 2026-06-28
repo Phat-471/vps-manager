@@ -825,7 +825,13 @@ async function checkPanelUpdateStatus(req, res) {
             });
         } else {
             // Chế độ ZIP/Source (Kiểm tra qua raw package.json trên GitHub main branch)
-            const pkgVersion = require('../../package.json').version;
+            const fs = require('fs');
+            const path = require('path');
+            let pkgVersion = '1.0.0';
+            try {
+                const pkgPath = path.join(__dirname, '../../package.json');
+                pkgVersion = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version;
+            } catch (e) {}
             const currentVersion = `v${pkgVersion}`;
 
             try {
