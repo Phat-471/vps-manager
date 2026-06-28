@@ -218,12 +218,12 @@ export default function PanelLogin({ onLogin }) {
 
       {/* Main card */}
       <div style={{
-        position: 'relative', zIndex: 10,
+        position: 'absolute', zIndex: 10,
+        top: '50%', left: '50%',
         width: '100%', maxWidth: 460,
         padding: '0 20px',
         boxSizing: 'border-box',
-        margin: '0 auto',
-        transform: mounted ? 'translateY(0)' : 'translateY(30px)',
+        transform: mounted ? 'translate(-50%, -50%)' : 'translate(-50%, calc(-50% + 30px))',
         opacity: mounted ? 1 : 0,
         transition: 'all 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)',
         animation: shake ? 'shake 0.5s ease-in-out' : 'none',
@@ -467,13 +467,13 @@ export default function PanelLogin({ onLogin }) {
       {/* Keyframe styles */}
       <style>{`
         @keyframes shake {
-          0%,100% { transform: translateX(0); }
-          15% { transform: translateX(-8px); }
-          30% { transform: translateX(8px); }
-          45% { transform: translateX(-6px); }
-          60% { transform: translateX(6px); }
-          75% { transform: translateX(-4px); }
-          90% { transform: translateX(4px); }
+          0%,100% { transform: translate(-50%, -50%) translateX(0); }
+          15% { transform: translate(-50%, -50%) translateX(-8px); }
+          30% { transform: translate(-50%, -50%) translateX(8px); }
+          45% { transform: translate(-50%, -50%) translateX(-6px); }
+          60% { transform: translate(-50%, -50%) translateX(6px); }
+          75% { transform: translate(-50%, -50%) translateX(-4px); }
+          90% { transform: translate(-50%, -50%) translateX(4px); }
         }
         @keyframes spin {
           to { transform: rotate(360deg); }
