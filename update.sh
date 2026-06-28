@@ -79,7 +79,7 @@ elif [ -f "/var/www/vps-manager/package.json" ]; then
     unzip -q "$TMP_ZIP" -d "$TMP_DIR"
     rm -f "$TMP_ZIP"
     
-    SRC_DIR=$(find "$TMP_DIR" -name "package.json" -exec dirname {} \; | head -n1)
+    SRC_DIR=$(find "$TMP_DIR" -maxdepth 2 -name "package.json" -exec dirname {} \; | head -n1)
     if [ -z "$SRC_DIR" ]; then
         echo -e "${RED}Lỗi: ZIP tải về không hợp lệ! Hủy cập nhật.${NC}"
         rm -rf /tmp/vps_manager_update_bak "$TMP_DIR"
