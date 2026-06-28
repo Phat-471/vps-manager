@@ -824,44 +824,52 @@ async function checkPanelUpdateStatus(req, res) {
                 changelog
             });
         } else {
-            // Chế độ Tệp nhị phân (Binary Mode)
+            // Chế độ ZIP/Source (Kiểm tra qua raw package.json trên GitHub main branch)
             const pkgVersion = require('../../package.json').version;
             const currentVersion = `v${pkgVersion}`;
 
             try {
-                const latestRelease = await getLatestGitHubRelease();
-                const latestTag = latestRelease.tag_name; // VD: "v1.1.0" hoặc "1.1.0"
-                const cleanLatest = latestTag.replace(/^v/, '');
-                const cleanCurrent = pkgVersion.replace(/^v/, '');
+                const remotePkg = await new Promise((resolve, reject) => {
+                    const https = require('https');
+                    const options = {
+                        hostname: 'raw.githubusercontent.com',
+                        path: '/Phat-471/vps-manager/main/package.json',
+                        headers: {
+                            'User-Agent': 'vps-management-tool'
+                        }
+                    };
 
-                const hasUpdate = cleanLatest !== cleanCurrent;
+                    https.get(options, (res) => {
+                        let data = '';
+                        res.on('data', (chunk) => data += chunk);
+                        res.on('end', () => {
+                            try {
+                                if (res.statusCode !== 200) {
+                                    return reject(new Error(`GitHub API error: ${res.statusCode}`));
+                                }
+                                resolve(JSON.parse(data));
+                            } catch (e) {
+                                reject(e);
+                            }
+                        });
+                    }).on('error', (err) => {
+                        reject(err);
+                    });
+                });
 
-                let changelog = [];
-                if (latestRelease.body) {
-                    // Lọc lấy các dòng bullet point từ mô tả release làm changelog
-                    changelog = latestRelease.body
-                        .split('\n')
-                        .map(line => line.trim())
-                        .filter(line => line.startsWith('-') || line.startsWith('*') || line.startsWith('•'))
-                        .slice(0, 10);
-                    
-                    if (changelog.length === 0) {
-                        changelog = [latestRelease.name || latestRelease.tag_name];
-                    }
-                } else {
-                    changelog = [latestRelease.name || latestRelease.tag_name];
-                }
+                const latestVersion = `v${remotePkg.version}`;
+                const hasUpdate = remotePkg.version !== pkgVersion;
+                const changelog = remotePkg.description ? [remotePkg.description] : [`Cập nhật tự động phiên bản mới từ nhánh main`];
 
                 return res.json({
                     success: true,
                     isGitMode: false,
                     hasUpdate,
                     currentVersion,
-                    latestVersion: latestTag,
+                    latestVersion,
                     changelog
                 });
             } catch (githubErr) {
-                // Trả về thông tin phiên bản hiện tại, báo lỗi kết nối GitHub check update
                 return res.json({
                     success: true,
                     isGitMode: false,
