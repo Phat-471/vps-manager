@@ -220,7 +220,9 @@ export default function PanelLogin({ onLogin }) {
       <div style={{
         position: 'relative', zIndex: 10,
         width: '100%', maxWidth: 460,
-        padding: '0 16px',
+        padding: '0 20px',
+        boxSizing: 'border-box',
+        margin: '0 auto',
         transform: mounted ? 'translateY(0)' : 'translateY(30px)',
         opacity: mounted ? 1 : 0,
         transition: 'all 0.7s cubic-bezier(0.34, 1.56, 0.64, 1)',

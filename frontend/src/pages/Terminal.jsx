@@ -151,13 +151,13 @@ export default function Terminal() {
   };
 
   return (
-    <div className="space-y-4 h-[calc(100vh-160px)] flex flex-col">
-      <div>
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 80px)' }}>
+      <div style={{ flexShrink: 0 }}>
         <h1 className="text-2xl font-bold tracking-tight">SSH Terminal</h1>
         <p className="text-sm text-gray-400">Thiết lập kết nối dòng lệnh trực tiếp (SSH Shell) tới VPS</p>
       </div>
 
-      <div className="flex-1 flex gap-4 min-h-[400px] overflow-hidden">
+      <div className="flex gap-4 overflow-hidden" style={{ flex: 1, minHeight: 0, marginTop: '1rem' }}>
         {/* Terminal Area */}
         <div className="flex-1 card-glass p-3 rounded-xl overflow-hidden flex">
           <div
