@@ -1226,7 +1226,7 @@ export default function AppInstaller() {
         </div>
 
         {/* Right: Logs + Result */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 20, alignSelf: 'start' }}>
           {/* Installed result */}
           {installedData && (
             <div className="card-glass p-5 rounded-xl animate-fade-in" style={{ borderRadius: 14, padding: 20 }}>
