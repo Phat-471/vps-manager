@@ -82,8 +82,8 @@ async function installWordPress(req, res) {
 
             echo ">> Tạo cơ sở dữ liệu MySQL..."
             mysql -e "CREATE DATABASE IF NOT EXISTS \\\`${dbName}\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-            mysql -e "CREATE USER IF NOT EXISTS '${dbUser}'@'localhost' IDENTIFIED BY '${dbPass}';"
-            mysql -e "GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'localhost';"
+            mysql -e "CREATE USER IF NOT EXISTS '${dbUser}'@'%' IDENTIFIED BY '${dbPass}';"
+            mysql -e "GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'%';"
             mysql -e "FLUSH PRIVILEGES;"
 
             echo ">> Cấu hình wp-config.php..."
@@ -91,6 +91,7 @@ async function installWordPress(req, res) {
             sed -i "s/database_name_here/${dbName}/g" wp-config.php
             sed -i "s/username_here/${dbUser}/g" wp-config.php
             sed -i "s/password_here/${dbPass}/g" wp-config.php
+            sed -i "s/localhost/127.0.0.1/g" wp-config.php
 
             echo ">> Tải Salts bảo mật từ api.wordpress.org..."
             SALTS=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/ || echo "")
@@ -271,8 +272,8 @@ async function installLaravel(req, res) {
 
             echo ">> Tạo cơ sở dữ liệu MySQL..."
             mysql -e "CREATE DATABASE IF NOT EXISTS \\\`${dbName}\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-            mysql -e "CREATE USER IF NOT EXISTS '${dbUser}'@'localhost' IDENTIFIED BY '${dbPass}';"
-            mysql -e "GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'localhost';"
+            mysql -e "CREATE USER IF NOT EXISTS '${dbUser}'@'%' IDENTIFIED BY '${dbPass}';"
+            mysql -e "GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'%';"
             mysql -e "FLUSH PRIVILEGES;"
 
             echo ">> Cài đặt Composer Dependencies..."
@@ -445,8 +446,8 @@ async function prepareInstallation(req, res) {
 
                 echo ">> Tạo cơ sở dữ liệu MySQL..."
                 mysql -e "CREATE DATABASE IF NOT EXISTS \\\`${dbName}\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-                mysql -e "CREATE USER IF NOT EXISTS '${dbUser}'@'localhost' IDENTIFIED BY '${dbPass}';"
-                mysql -e "GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'localhost';"
+                mysql -e "CREATE USER IF NOT EXISTS '${dbUser}'@'%' IDENTIFIED BY '${dbPass}';"
+                mysql -e "GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'%';"
                 mysql -e "FLUSH PRIVILEGES;"
 
                 echo ">> Cấu hình wp-config.php..."
@@ -454,6 +455,7 @@ async function prepareInstallation(req, res) {
                 sed -i "s/database_name_here/${dbName}/g" wp-config.php
                 sed -i "s/username_here/${dbUser}/g" wp-config.php
                 sed -i "s/password_here/${dbPass}/g" wp-config.php
+                sed -i "s/localhost/127.0.0.1/g" wp-config.php
 
                 echo ">> Tải Salts bảo mật từ api.wordpress.org..."
                 SALTS=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/ || echo "")
@@ -586,8 +588,8 @@ EOF
 
                 echo ">> Tạo cơ sở dữ liệu MySQL..."
                 mysql -e "CREATE DATABASE IF NOT EXISTS \\\`${dbName}\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-                mysql -e "CREATE USER IF NOT EXISTS '${dbUser}'@'localhost' IDENTIFIED BY '${dbPass}';"
-                mysql -e "GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'localhost';"
+                mysql -e "CREATE USER IF NOT EXISTS '${dbUser}'@'%' IDENTIFIED BY '${dbPass}';"
+                mysql -e "GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'%';"
                 mysql -e "FLUSH PRIVILEGES;"
 
                 echo ">> Cài đặt Composer Dependencies..."
