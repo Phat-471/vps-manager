@@ -11,6 +11,7 @@ import {
 // ─── SERVICE CATALOG ────────────────────────────────────────────────────────
 const CATEGORIES = [
   { id: 'all',       label: 'Tất cả',        icon: '⚡' },
+  { id: 'installed', label: 'Web đã cài đặt', icon: '🌐' },
   { id: 'cms',       label: 'CMS & Blog',     icon: '📝' },
   { id: 'lang',      label: 'Ngôn ngữ',       icon: '💻' },
   { id: 'db',        label: 'Database',       icon: '🗄️' },
@@ -507,6 +508,10 @@ export default function AppInstaller() {
   const [fetchingStatus, setFetchingStatus] = useState(false);
   const [showPmaForm, setShowPmaForm] = useState(false);
 
+  // Installed websites list states
+  const [installedSites, setInstalledSites] = useState([]);
+  const [loadingSites, setLoadingSites] = useState(false);
+
   const logEndRef = useRef(null);
   const preparedDataRef = useRef(null);
 
@@ -549,9 +554,48 @@ export default function AppInstaller() {
     finally { setLoading(false); }
   };
 
+  const loadInstalledSites = async () => {
+    if (!currentVPS) return;
+    setLoadingSites(true);
+    try {
+      const res = await apiCall('/api/webserver/list', 'POST');
+      if (res.success) {
+        setInstalledSites(res.data || []);
+      }
+    } catch (err) {
+      showToast('Không thể tải danh sách website: ' + err.message, 'error');
+    } finally {
+      setLoadingSites(false);
+    }
+  };
+
+  const handleDeleteSite = async (domainName) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa website ${domainName}? Hành động này không thể hoàn tác.`)) {
+      return;
+    }
+    setLoadingSites(true);
+    try {
+      const res = await apiCall('/api/webserver/delete', 'POST', { domain: domainName });
+      if (res.success) {
+        showToast(`Đã xóa website ${domainName} thành công`, 'success');
+        loadInstalledSites();
+      }
+    } catch (err) {
+      showToast('Lỗi khi xóa website: ' + err.message, 'error');
+    } finally {
+      setLoadingSites(false);
+    }
+  };
+
   useEffect(() => {
     if (selectedService?.id === 'phpmyadmin' && isConnected && currentVPS) fetchPmaStatus();
   }, [selectedService, isConnected, currentVPS]);
+
+  useEffect(() => {
+    if (activeCategory === 'installed' && isConnected && currentVPS) {
+      loadInstalledSites();
+    }
+  }, [activeCategory, isConnected, currentVPS]);
 
   // Socket events
   useEffect(() => {
@@ -709,7 +753,7 @@ export default function AppInstaller() {
           {/* Category tabs */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
             {CATEGORIES.map(cat => {
-              const count = cat.id === 'all' ? SERVICES.length : SERVICES.filter(s => s.category === cat.id).length;
+              const count = cat.id === 'all' ? SERVICES.length : cat.id === 'installed' ? installedSites.length : SERVICES.filter(s => s.category === cat.id).length;
               const isActive = activeCategory === cat.id;
               return (
                 <button key={cat.id} onClick={() => setActiveCategory(cat.id)} style={{
@@ -732,7 +776,87 @@ export default function AppInstaller() {
           </div>
 
           {/* Service Grid */}
-          {filteredServices.length === 0 ? (
+          {activeCategory === 'installed' ? (
+            <div className="card-glass p-6 rounded-xl space-y-4" style={{ padding: 20, borderRadius: 14 }}>
+              <div className="flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h2 className="text-sm font-semibold flex items-center gap-2 text-gray-200" style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
+                  <Globe size={16} className="text-indigo-400" />
+                  Danh sách Website đã triển khai trên VPS
+                </h2>
+                <button 
+                  onClick={loadInstalledSites} 
+                  disabled={loadingSites} 
+                  className="btn btn-glass btn-sm flex items-center gap-1 text-xs"
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px' }}
+                >
+                  <RotateCw size={12} className={loadingSites ? "animate-spin" : ""} />
+                  Làm mới
+                </button>
+              </div>
+
+              {loadingSites ? (
+                <div className="text-center py-12 text-gray-400 text-xs">
+                  <Loader size={20} className="animate-spin mx-auto mb-2" />
+                  Đang tải danh sách website...
+                </div>
+              ) : installedSites.length === 0 ? (
+                <div className="text-center py-12 text-gray-400 text-xs">
+                  Chưa có website nào được cài đặt.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="explorer-list-table w-full text-left border-collapse" style={{ width: '100%' }}>
+                    <thead>
+                      <tr className="border-b border-white/5">
+                        <th className="py-2.5 px-4 text-xs font-semibold text-gray-400">Tên miền (Domain)</th>
+                        <th className="py-2.5 px-4 text-xs font-semibold text-gray-400">Loại Website</th>
+                        <th className="py-2.5 px-4 text-xs font-semibold text-gray-400">Thư mục gốc (Root Path)</th>
+                        <th className="py-2.5 px-4 text-xs font-semibold text-gray-400 text-right" style={{ textAlign: 'right' }}>Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {installedSites.map(site => (
+                        <tr key={site.domain} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                          <td className="py-3 px-4 text-xs font-semibold text-gray-100">
+                            <a 
+                              href={`http://${site.domain}`} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="hover:underline text-indigo-400"
+                            >
+                              {site.domain}
+                            </a>
+                          </td>
+                          <td className="py-3 px-4 text-xs">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-mono ${
+                              site.type === 'php' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' :
+                              site.type === 'proxy' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                              'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            }`}>
+                              {site.type.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-xs text-gray-400 font-mono">
+                            {site.root}
+                          </td>
+                          <td className="py-3 px-4 text-xs text-right" style={{ textAlign: 'right' }}>
+                            <button
+                              onClick={() => handleDeleteSite(site.domain)}
+                              className="btn btn-glass text-red-400 hover:bg-red-500/20"
+                              style={{ padding: '6px', border: 'none', background: 'none', cursor: 'pointer' }}
+                              title="Xóa Website"
+                            >
+                              <Trash size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : filteredServices.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px 24px', color: '#475569' }}>
               <Package size={40} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
               <p style={{ fontSize: 14 }}>Không tìm thấy dịch vụ nào phù hợp</p>
