@@ -744,7 +744,7 @@ server {
     }
 }
 EOF
-                sed -i "s|FPM_SOCK_PLACEHOLDER|\\$FPM_SOCK|g" /etc/nginx/sites-available/phpmyadmin
+                sed -i "s|FPM_SOCK_PLACEHOLDER|\$FPM_SOCK|g" /etc/nginx/sites-available/phpmyadmin
                 ln -sf /etc/nginx/sites-available/phpmyadmin /etc/nginx/sites-enabled/
 
                 nginx -t
