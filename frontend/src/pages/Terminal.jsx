@@ -62,7 +62,7 @@ export default function Terminal() {
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    term.writeln('正在建立 SSH Terminal 终端连接...');
+    term.writeln('Đang kết nối SSH Terminal...');
 
     // Emit event to create terminal process on server
     socket.emit('terminal:create', currentVPS);
@@ -70,7 +70,7 @@ export default function Terminal() {
     // Event listeners
     socket.on('terminal:ready', () => {
       term.reset();
-      term.writeln('\x1b[1;32m✓ SSH Terminal 连接已建立! (IP: ' + currentVPS.host + ')\x1b[0m\r\n');
+      term.writeln('\x1b[1;32m✓ Đã kết nối SSH Terminal! (IP: ' + currentVPS.host + ')\x1b[0m\r\n');
     });
 
     socket.on('terminal:data', (data) => {
@@ -90,8 +90,8 @@ export default function Terminal() {
       socket.emit('terminal:input', data);
     });
 
-    // Handle resizing window
-    const handleResize = () => {
+    // Handle resizing window via ResizeObserver
+    const resizeObserver = new ResizeObserver(() => {
       try {
         fitAddon.fit();
         socket.emit('terminal:resize', {
@@ -101,16 +101,21 @@ export default function Terminal() {
       } catch (e) {
         console.error(e);
       }
-    };
+    });
 
-    window.addEventListener('resize', handleResize);
+    if (terminalRef.current) {
+      resizeObserver.observe(terminalRef.current);
+    }
 
-    // Delay resize request slightly after mount
-    setTimeout(handleResize, 100);
-    setTimeout(handleResize, 400);
+    // Delay initial fit slightly to ensure DOM layout is settled
+    setTimeout(() => {
+      try {
+        fitAddon.fit();
+      } catch {}
+    }, 100);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       socket.off('terminal:ready');
       socket.off('terminal:data');
       socket.off('terminal:error');
