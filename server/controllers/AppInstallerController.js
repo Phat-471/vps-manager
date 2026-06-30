@@ -93,15 +93,6 @@ async function installWordPress(req, res) {
             sed -i "s/password_here/${dbPass}/g" wp-config.php
             sed -i "s/localhost/127.0.0.1/g" wp-config.php
 
-            echo ">> Tải Salts bảo mật từ api.wordpress.org..."
-            SALTS=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/ || echo "")
-            if [ -n "$SALTS" ]; then
-                # Xóa các dòng salt cũ trong wp-config.php
-                sed -i '/AUTH_KEY/,/NONCE_SALT/d' wp-config.php
-                # Chèn salts mới
-                echo "$SALTS" >> wp-config.php
-            fi
-
             echo ">> Phân quyền thư mục sơ bộ..."
             chown -R www-data:www-data /var/www/${safeDomain}
             find /var/www/${safeDomain} -type d -exec chmod 755 {} \\;
@@ -113,6 +104,9 @@ async function installWordPress(req, res) {
                 curl -sL -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
                 chmod +x /usr/local/bin/wp
             fi
+
+            # Thiết lập Salts bảo mật tự động và đúng vị trí qua WP-CLI
+            wp config shuffle-salts --allow-root
 
             # Execute WP-CLI installation
             wp core install --url="http://${safeDomain}" --title=${escapedSiteTitle} --admin_user=${escapedAdminUser} --admin_password=${escapedAdminPass} --admin_email=${escapedAdminEmail} --allow-root
@@ -457,15 +451,6 @@ async function prepareInstallation(req, res) {
                 sed -i "s/password_here/${dbPass}/g" wp-config.php
                 sed -i "s/localhost/127.0.0.1/g" wp-config.php
 
-                echo ">> Tải Salts bảo mật từ api.wordpress.org..."
-                SALTS=$(curl -s https://api.wordpress.org/secret-key/1.1/salt/ || echo "")
-                if [ -n "$SALTS" ]; then
-                    # Xóa các dòng salt cũ trong wp-config.php
-                    sed -i '/AUTH_KEY/,/NONCE_SALT/d' wp-config.php
-                    # Chèn salts mới
-                    echo "$SALTS" >> wp-config.php
-                fi
-
                 echo ">> Phân quyền thư mục sơ bộ..."
                 chown -R www-data:www-data /var/www/${safeDomain}
                 find /var/www/${safeDomain} -type d -exec chmod 755 {} \\;
@@ -477,6 +462,9 @@ async function prepareInstallation(req, res) {
                     curl -sL -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
                     chmod +x /usr/local/bin/wp
                 fi
+
+                # Thiết lập Salts bảo mật tự động và đúng vị trí qua WP-CLI
+                wp config shuffle-salts --allow-root
 
                 # Execute WP-CLI installation
                 wp core install --url="http://${safeDomain}" --title=${escapedSiteTitle} --admin_user=${escapedAdminUser} --admin_password=${escapedAdminPass} --admin_email=${escapedAdminEmail} --allow-root

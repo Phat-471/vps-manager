@@ -169,6 +169,7 @@ const SCRIPTS = {
             fi
 
             # Execute WP-CLI installation
+            wp config shuffle-salts --allow-root
             wp core install --url="http://\${DOMAIN}" --title="\${SITE_TITLE}" --admin_user="\${ADMIN_USER}" --admin_password="\${ADMIN_PASS}" --admin_email="\${ADMIN_EMAIL}" --allow-root
 
             echo "5. Cấu hình ảo hóa Nginx Virtual Host..."
