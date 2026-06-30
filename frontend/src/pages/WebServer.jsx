@@ -392,7 +392,8 @@ export default function WebServer() {
   };
 
   const handleInstallSSL = async (domainName) => {
-    if (currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') {
+    const isLocalhostDomain = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if ((currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') && isLocalhostDomain) {
       showToast('Không thể cài đặt Let\'s Encrypt SSL ở chế độ Native Mode (Localhost). Yêu cầu VPS có IP Public thực tế.', 'warning');
       return;
     }
@@ -412,7 +413,8 @@ export default function WebServer() {
 
   const handleInstallWildcardSSL = async (e) => {
     e.preventDefault();
-    if (currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') {
+    const isLocalhostDomain = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if ((currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') && isLocalhostDomain) {
       showToast('Không thể cài đặt SSL Wildcard ở chế độ Native Mode (Localhost).', 'warning');
       return;
     }
@@ -688,7 +690,7 @@ export default function WebServer() {
       {/* Tab: SSL Certificates */}
       {activeTab === 'ssl' && (
         <div className="card-glass p-6 rounded-xl space-y-6">
-          {(currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') && (
+          {(currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && (
             <div className="p-4 rounded-xl border border-yellow-500/20 bg-yellow-500/5 text-xs text-yellow-300 leading-relaxed flex items-center gap-2.5">
               <ShieldAlert className="text-yellow-400 shrink-0" size={20} />
               <div>

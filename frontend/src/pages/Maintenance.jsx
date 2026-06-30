@@ -156,7 +156,8 @@ export default function Maintenance() {
       showToast('Vui lòng nhập tên miền', 'warning');
       return;
     }
-    if (currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') {
+    const isLocalhostDomain = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if ((currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') && isLocalhostDomain) {
       showToast('Không thể cài đặt SSL Let\'s Encrypt ở chế độ Native Mode (Localhost).', 'warning');
       return;
     }
@@ -349,7 +350,7 @@ export default function Maintenance() {
               Cấu hình tên miền riêng và chứng chỉ SSL Let's Encrypt giúp bạn truy cập VPS Manager Panel an toàn qua HTTPS thay vì liên kết HTTP mặc định.
             </p>
 
-            {(currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') ? (
+            {(currentVPS?.host === 'localhost' || currentVPS?.host === '127.0.0.1') && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? (
               <div className="p-4 rounded-xl border border-yellow-500/20 bg-yellow-500/5 text-xs text-yellow-300 leading-relaxed flex items-center gap-2.5">
                 <ShieldAlert className="text-yellow-400 shrink-0" size={20} />
                 <div>
