@@ -50,14 +50,17 @@ async function getPHPConfig(req, res) {
 
             echo "PATH:$INI_PATH"
             echo "VERSION:$VERSION"
-            echo "MEMORY_LIMIT:$(grep -E '^\s*memory_limit\s*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo '128M')"
-            echo "UPLOAD_MAX_FILESIZE:$(grep -E '^\s*upload_max_filesize\s*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo '2M')"
-            echo "POST_MAX_SIZE:$(grep -E '^\s*post_max_size\s*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo '8M')"
-            echo "MAX_EXECUTION_TIME:$(grep -E '^\s*max_execution_time\s*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo '30')"
-            echo "DISPLAY_ERRORS:$(grep -E '^\s*display_errors\s*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo 'Off')"
+            echo "MEMORY_LIMIT:$(grep -E '^[[:space:]]*memory_limit[[:space:]]*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo '128M')"
+            echo "UPLOAD_MAX_FILESIZE:$(grep -E '^[[:space:]]*upload_max_filesize[[:space:]]*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo '2M')"
+            echo "POST_MAX_SIZE:$(grep -E '^[[:space:]]*post_max_size[[:space:]]*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo '8M')"
+            echo "MAX_EXECUTION_TIME:$(grep -E '^[[:space:]]*max_execution_time[[:space:]]*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo '30')"
+            echo "DISPLAY_ERRORS:$(grep -E '^[[:space:]]*display_errors[[:space:]]*=' $INI_PATH | head -1 | awk -F= '{print $2}' | tr -d ' ' || echo 'Off')"
         `;
 
         const result = await ssh.executeCommand(script);
+        console.log('--- PHP CONFIG SCRIPT STDOUT ---');
+        console.log(result.stdout);
+        console.log('--------------------------------');
         if (result.stdout.includes('ERROR:')) {
             return res.status(404).json({ success: false, error: result.stdout.trim() });
         }

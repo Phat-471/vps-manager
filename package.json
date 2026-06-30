@@ -1,6 +1,6 @@
 {
   "name": "vps-management-tool",
-  "version": "1.3.7",
+  "version": "1.3.8",
   "description": "Công cụ quản lý VPS dễ dàng cho người mới bắt đầu",
   "main": "server/server.js",
   "bin": "server/server.js",
