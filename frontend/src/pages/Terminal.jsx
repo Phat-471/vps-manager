@@ -164,12 +164,13 @@ export default function Terminal() {
 
       <div className="flex gap-4 overflow-hidden" style={{ flex: 1, minHeight: 0, marginTop: '1rem' }}>
         {/* Terminal Area */}
-        <div className="flex-1 card-glass p-3 rounded-xl overflow-hidden flex">
+        {/* Terminal Area */}
+        <div className="flex-1 card-glass p-3 rounded-xl overflow-hidden" style={{ height: '100%', width: '100%' }}>
           <div
             ref={terminalRef}
             id="terminal"
             className="w-full h-full rounded-lg overflow-hidden"
-            style={{ fontFamily: 'Courier New, Courier, monospace' }}
+            style={{ fontFamily: 'Courier New, Courier, monospace', width: '100%', height: '100%' }}
           />
         </div>
 
