@@ -110,8 +110,8 @@ async function savePHPConfig(req, res) {
             set_ini_val() {
                 local key=$1
                 local val=$2
-                if grep -qE "^\\s*$key\\s*=" ${safePath}; then
-                    sed -i "s|^\\s*$key\\s*=.*|$key = $val|g" ${safePath}
+                if grep -qE "^[[:space:]]*$key[[:space:]]*=" ${safePath}; then
+                    sed -i "s|^[[:space:]]*$key[[:space:]]*=.*|$key = $val|g" ${safePath}
                 else
                     echo "$key = $val" >> ${safePath}
                 fi
