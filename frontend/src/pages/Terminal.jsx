@@ -57,7 +57,6 @@ export default function Terminal() {
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(terminalRef.current);
-    fitAddon.fit();
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -90,7 +89,7 @@ export default function Terminal() {
       socket.emit('terminal:input', data);
     });
 
-    // Handle resizing window via ResizeObserver
+    // Handle resizing window via ResizeObserver on parent element
     const resizeObserver = new ResizeObserver(() => {
       try {
         fitAddon.fit();
@@ -103,16 +102,20 @@ export default function Terminal() {
       }
     });
 
-    if (terminalRef.current) {
-      resizeObserver.observe(terminalRef.current);
+    if (terminalRef.current && terminalRef.current.parentElement) {
+      resizeObserver.observe(terminalRef.current.parentElement);
     }
 
     // Delay initial fit slightly to ensure DOM layout is settled
     setTimeout(() => {
       try {
         fitAddon.fit();
+        socket.emit('terminal:resize', {
+          cols: term.cols,
+          rows: term.rows,
+        });
       } catch {}
-    }, 100);
+    }, 200);
 
     return () => {
       resizeObserver.disconnect();
@@ -164,13 +167,11 @@ export default function Terminal() {
 
       <div className="flex gap-4 overflow-hidden" style={{ flex: 1, minHeight: 0, marginTop: '1rem' }}>
         {/* Terminal Area */}
-        {/* Terminal Area */}
-        <div className="flex-1 card-glass p-3 rounded-xl overflow-hidden" style={{ height: '100%', width: '100%' }}>
+        <div className="flex-1 card-glass p-3 rounded-xl overflow-hidden" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
           <div
             ref={terminalRef}
             id="terminal"
-            className="w-full h-full rounded-lg overflow-hidden"
-            style={{ fontFamily: 'Courier New, Courier, monospace', width: '100%', height: '100%' }}
+            style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0, fontFamily: 'Courier New, Courier, monospace' }}
           />
         </div>
 
