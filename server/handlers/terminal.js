@@ -16,9 +16,17 @@ function create(socket, vpsConfig) {
 
     if (isLocal) {
         const { spawn } = require('child_process');
-        // Use 'script' to allocate a pseudo-TTY for interactive terminal behavior
-        const shell = spawn('script', ['-q', '-c', '/bin/bash', '/dev/null'], {
+        const isWin = process.platform === 'win32';
+        const shellCmd = isWin ? 'powershell.exe' : 'script';
+        const shellArgs = isWin ? [] : ['-q', '-c', '/bin/bash', '/dev/null'];
+
+        const shell = spawn(shellCmd, shellArgs, {
             env: { ...process.env, TERM: 'xterm-256color' }
+        });
+
+        shell.on('error', (err) => {
+            console.error('[TerminalHandler] Local shell spawn error:', err.message);
+            socket.emit('terminal:error', { error: 'Không thể khởi chạy shell cục bộ: ' + err.message });
         });
 
         socket.emit('terminal:ready');

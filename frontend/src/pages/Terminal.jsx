@@ -159,15 +159,15 @@ export default function Terminal() {
   };
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 80px)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 80px)' }}>
       <div style={{ flexShrink: 0 }}>
         <h1 className="text-2xl font-bold tracking-tight">SSH Terminal</h1>
         <p className="text-sm text-gray-400">Thiết lập kết nối dòng lệnh trực tiếp (SSH Shell) tới VPS</p>
       </div>
 
-      <div className="flex gap-4 overflow-hidden" style={{ flex: 1, minHeight: 0, marginTop: '1rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'row', gap: '16px', flex: 1, minHeight: 0, marginTop: '1rem', overflow: 'hidden' }}>
         {/* Terminal Area */}
-        <div className="flex-1 card-glass p-3 rounded-xl overflow-hidden" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <div className="card-glass p-3 rounded-xl" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
           <div
             ref={terminalRef}
             id="terminal"
@@ -176,9 +176,9 @@ export default function Terminal() {
         </div>
 
         {/* Snippet Manager Sidebar */}
-        <div className="w-80 card-glass p-4 rounded-xl flex flex-col space-y-4 overflow-y-auto max-h-full">
-          <div className="flex justify-between items-center border-b border-white/10 pb-2">
-            <span className="text-sm font-bold text-gray-200 flex items-center gap-1.5 font-outfit">
+        <div className="card-glass p-4 rounded-xl" style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', maxHeight: '100%' }}>
+          <div className="flex justify-between items-center border-b border-white/10 pb-2" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="text-sm font-bold text-gray-200 flex items-center gap-1.5 font-outfit" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <TermIcon size={16} className="text-indigo-400" />
               Snippet Manager
             </span>

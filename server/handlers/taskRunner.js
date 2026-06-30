@@ -23,7 +23,11 @@ async function start(socket, { vpsConfig, command }) {
 
         if (isLocal) {
             console.log(`[TaskRunner] Running local command: ${command}`);
-            const child = spawn('/bin/bash', ['-c', command], {
+            const isWin = process.platform === 'win32';
+            const shellCmd = isWin ? 'powershell.exe' : '/bin/bash';
+            const shellArgs = isWin ? ['-Command', command] : ['-c', command];
+
+            const child = spawn(shellCmd, shellArgs, {
                 env: { ...process.env, TERM: 'xterm-256color' }
             });
 
