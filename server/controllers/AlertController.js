@@ -272,6 +272,17 @@ async function saveThreshold(req, res) {
         };
         
         writeConfig(config);
+
+        // Kích hoạt quét tài nguyên & ghi nhận lịch sử ngay lập tức
+        try {
+            const alertDaemon = require('../utils/alertDaemon');
+            if (alertDaemon && typeof alertDaemon.checkAllThresholds === 'function') {
+                alertDaemon.checkAllThresholds().catch(err => console.error('[AlertDaemon] Immediate check error:', err.message));
+            }
+        } catch (e) {
+            console.error('Không thể gọi alertDaemon:', e.message);
+        }
+
         res.json({ success: true, message: 'Đã cập nhật cấu hình cảnh báo của VPS thành công!' });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
