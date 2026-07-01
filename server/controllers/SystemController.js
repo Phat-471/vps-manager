@@ -18,20 +18,30 @@ async function getSystemInfo(req, res) {
 
         const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
 
-        // Get system information
-        const commands = {
-            hostname: 'hostname',
-            os: 'cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d \\"',
-            kernel: 'uname -r',
-            uptime: 'uptime -p 2>/dev/null || uptime',
-            architecture: 'uname -m'
-        };
+        // Get system information in a single combined execution
+        const combinedCmd = 'echo "===HOSTNAME===" && hostname && echo "===OS===" && cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d \\" && echo "===KERNEL===" && uname -r && echo "===UPTIME===" && (uptime -p 2>/dev/null || uptime) && echo "===ARCH===" && uname -m';
+        const result = await ssh.executeCommand(combinedCmd);
+        const output = result.stdout || '';
 
-        const results = {};
-        for (const [key, cmd] of Object.entries(commands)) {
-            const result = await ssh.executeCommand(cmd);
-            results[key] = result.stdout.trim();
-        }
+        const hostnameMarker = '===HOSTNAME===';
+        const osMarker = '===OS===';
+        const kernelMarker = '===KERNEL===';
+        const uptimeMarker = '===UPTIME===';
+        const archMarker = '===ARCH===';
+
+        const hostnameIndex = output.indexOf(hostnameMarker);
+        const osIndex = output.indexOf(osMarker);
+        const kernelIndex = output.indexOf(kernelMarker);
+        const uptimeIndex = output.indexOf(uptimeMarker);
+        const archIndex = output.indexOf(archMarker);
+
+        const results = {
+            hostname: hostnameIndex !== -1 && osIndex !== -1 ? output.substring(hostnameIndex + hostnameMarker.length, osIndex).trim() : 'N/A',
+            os: osIndex !== -1 && kernelIndex !== -1 ? output.substring(osIndex + osMarker.length, kernelIndex).trim() : 'N/A',
+            kernel: kernelIndex !== -1 && uptimeIndex !== -1 ? output.substring(kernelIndex + kernelMarker.length, uptimeIndex).trim() : 'N/A',
+            uptime: uptimeIndex !== -1 && archIndex !== -1 ? output.substring(uptimeIndex + uptimeMarker.length, archIndex).trim() : 'N/A',
+            architecture: archIndex !== -1 ? output.substring(archIndex + archMarker.length).trim() : 'N/A'
+        };
 
         res.json({
             success: true,

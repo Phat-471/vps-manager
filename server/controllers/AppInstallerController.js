@@ -362,6 +362,7 @@ async function prepareInstallation(req, res) {
         const { 
             vpsConfig, 
             appId, 
+            version,
             domain, 
             email, 
             appName, 
@@ -1332,6 +1333,271 @@ EOF
                 echo "=== CÀI ĐẶT CERTBOT HOÀN TẤT ==="
             `;
             return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'php') {
+            const safeVersion = version ? version.trim().replace(/[^0-9.]/g, '') : '8.2';
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT PHP ${safeVersion} ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update
+                    apt-get install -y software-properties-common
+                    add-apt-repository -y ppa:ondrej/php
+                    apt-get update
+                    apt-get install -y php${safeVersion} php${safeVersion}-fpm php${safeVersion}-mysql php${safeVersion}-curl php${safeVersion}-gd php${safeVersion}-mbstring php${safeVersion}-xml php${safeVersion}-zip php${safeVersion}-bcmath
+                    systemctl start php${safeVersion}-fpm || true
+                    systemctl enable php${safeVersion}-fpm || true
+                else
+                    echo ">> Hệ điều hành CentOS/RedHat chưa được hỗ trợ cài đặt PHP qua PPA."
+                    exit 1
+                fi
+                php -v
+                echo "=== CÀI ĐẶT PHP ${safeVersion} HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'nodejs') {
+            const safeVersion = version ? version.trim().replace(/[^0-9]/g, '') : '20';
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT NODEJS ${safeVersion} ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update
+                    curl -fsSL https://deb.nodesource.com/setup_${safeVersion}.x | bash -
+                    apt-get install -y nodejs
+                else
+                    curl -fsSL https://rpm.nodesource.com/setup_${safeVersion}.x | bash -
+                    yum install -y nodejs
+                fi
+                node -v
+                npm -v
+                echo "=== CÀI ĐẶT NODEJS ${safeVersion} HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'python') {
+            const safeVersion = version ? version.trim().replace(/[^0-9.]/g, '') : '3.12';
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT PYTHON ${safeVersion} ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update
+                    apt-get install -y python${safeVersion} python${safeVersion}-venv python3-pip || apt-get install -y python3 python3-venv python3-pip
+                else
+                    yum install -y python3 python3-pip
+                fi
+                python3 --version
+                pip3 --version || pip --version
+                echo "=== CÀI ĐẶT PYTHON ${safeVersion} HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'mysql') {
+            const safeVersion = version ? version.trim().replace(/[^a-zA-Z0-9.-]/g, '') : 'mysql-8.0';
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT DATABASE: ${safeVersion} ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update
+                    if [[ "${safeVersion}" == *"mariadb"* ]]; then
+                        apt-get install -y mariadb-server mariadb-client
+                        systemctl start mariadb || true
+                        systemctl enable mariadb || true
+                    else
+                        apt-get install -y mysql-server mysql-client
+                        systemctl start mysql || true
+                        systemctl enable mysql || true
+                    fi
+                else
+                    if [[ "${safeVersion}" == *"mariadb"* ]]; then
+                        yum install -y mariadb-server mariadb
+                        systemctl start mariadb || true
+                        systemctl enable mariadb || true
+                    else
+                        yum install -y mysql-server
+                        systemctl start mysqld || true
+                        systemctl enable mysqld || true
+                    fi
+                fi
+                echo "=== CÀI ĐẶT DATABASE HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'redis') {
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT REDIS SERVER ==="
+                if [ -f /etc/debian_version ]; then
+                    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                    apt-get update
+                    apt-get install -y redis-server
+                    systemctl start redis-server || true
+                    systemctl enable redis-server || true
+                else
+                    yum install -y redis
+                    systemctl start redis || true
+                    systemctl enable redis || true
+                fi
+                redis-cli --version
+                echo "=== CÀI ĐẶT REDIS SERVER HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: {} });
+        }
+
+        if (appId === 'grafana') {
+            const safePort = parseInt(port) || 3000;
+            let nginxProxyCmd = '';
+            let appUrl = `http://${host}:${safePort}`;
+
+            if (domain) {
+                const safeDomain = sanitizeAlphaNum(domain);
+                appUrl = (ssl === true || ssl === 'true') ? `https://${safeDomain}` : `http://${safeDomain}`;
+                nginxProxyCmd = `
+                    echo ">> Tạo cấu hình Nginx Reverse Proxy cho Grafana..."
+                    cat > /etc/nginx/sites-available/${safeDomain} << 'EOF'
+server {
+    listen 80;
+    server_name ${safeDomain} *.${safeDomain};
+
+    client_max_body_size 64M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${safePort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \\$host;
+        proxy_cache_bypass \\$http_upgrade;
+        proxy_set_header X-Real-IP \\$remote_addr;
+        proxy_set_header X-Forwarded-For \\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\$scheme;
+    }
+}
+EOF
+                    echo ">> Kích hoạt cấu hình Nginx..."
+                    ln -sf /etc/nginx/sites-available/${safeDomain} /etc/nginx/sites-enabled/
+                    nginx -t
+                    systemctl reload nginx
+                `;
+            }
+
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT GRAFANA OSS ==="
+                if ! command -v docker &> /dev/null; then
+                    echo ">> Docker chưa được cài đặt. Đang cài đặt Docker..."
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                        apt-get update && apt-get install -y docker.io
+                    else
+                        yum install -y docker
+                    fi
+                    systemctl start docker
+                    systemctl enable docker
+                fi
+
+                if docker ps -a | grep -q grafana; then
+                    echo ">> Container grafana đã tồn tại. Khởi động..."
+                    docker start grafana
+                else
+                    echo ">> Khởi chạy Grafana container..."
+                    docker run -d --name grafana -p ${safePort}:3000 --restart always grafana/grafana-oss:latest
+                fi
+
+                ${nginxProxyCmd}
+                ${sslCmd}
+
+                echo "=== CÀI ĐẶT GRAFANA OSS HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: { siteUrl: appUrl } });
+        }
+
+        if (appId === 'minio') {
+            const safePort = parseInt(port) || 9000;
+            const consolePort = safePort + 1;
+            let nginxProxyCmd = '';
+            let appUrl = `http://${host}:${safePort}`;
+
+            if (domain) {
+                const safeDomain = sanitizeAlphaNum(domain);
+                appUrl = (ssl === true || ssl === 'true') ? `https://${safeDomain}` : `http://${safeDomain}`;
+                nginxProxyCmd = `
+                    echo ">> Tạo cấu hình Nginx Reverse Proxy cho MinIO..."
+                    cat > /etc/nginx/sites-available/${safeDomain} << 'EOF'
+server {
+    listen 80;
+    server_name ${safeDomain} *.${safeDomain};
+
+    client_max_body_size 512M;
+
+    location / {
+        proxy_pass http://127.0.0.1:${safePort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \\$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \\$host;
+        proxy_cache_bypass \\$http_upgrade;
+        proxy_set_header X-Real-IP \\$remote_addr;
+        proxy_set_header X-Forwarded-For \\$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \\$scheme;
+    }
+}
+EOF
+                    echo ">> Kích hoạt cấu hình Nginx..."
+                    ln -sf /etc/nginx/sites-available/${safeDomain} /etc/nginx/sites-enabled/
+                    nginx -t
+                    systemctl reload nginx
+                `;
+            }
+
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT MINIO ==="
+                if ! command -v docker &> /dev/null; then
+                    echo ">> Docker chưa được cài đặt. Đang cài đặt Docker..."
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do echo ">> Đang chờ tiến trình apt khác giải phóng khóa hệ thống..."; sleep 3; done
+                        apt-get update && apt-get install -y docker.io
+                    else
+                        yum install -y docker
+                    fi
+                    systemctl start docker
+                    systemctl enable docker
+                fi
+
+                if docker ps -a | grep -q minio; then
+                    echo ">> Container minio đã tồn tại. Khởi động lại..."
+                    docker restart minio
+                else
+                    echo ">> Khởi chạy MinIO container (API port: ${safePort}, Console port: ${consolePort})..."
+                    docker run -d --name minio -p ${safePort}:9000 -p ${consolePort}:9001 --restart always -v minio_data:/data minio/minio server /data --console-address ":9001"
+                fi
+
+                ${nginxProxyCmd}
+                ${sslCmd}
+
+                echo "=== CÀI ĐẶT MINIO HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: { siteUrl: appUrl } });
+        }
+
+        if (appId === 'coolify') {
+            const command = `
+                set -e
+                echo "=== BẮT ĐẦU CÀI ĐẶT COOLIFY ==="
+                curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
+                echo "=== CÀI ĐẶT COOLIFY HOÀN TẤT ==="
+            `;
+            return res.json({ success: true, command: command.trim(), data: { siteUrl: `http://${host}:8000` } });
         }
 
         return res.status(400).json({ success: false, error: 'Ứng dụng không hỗ trợ' });

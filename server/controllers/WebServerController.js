@@ -1,6 +1,9 @@
 const { connectionPool } = require('../utils/ssh');
 const { sanitizeAlphaNum, escapeShellArg, sanitizeNumber } = require('../utils/security');
 const { logActivity } = require('../utils/logger');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 async function listSites(req, res) {
     try {
@@ -223,9 +226,60 @@ server {
 }`;
         }
 
-        // Create directory
-        await ssh.executeCommand(`mkdir -p ${safeRoot}`);
-        await ssh.executeCommand(`chown -R www-data:www-data ${safeRoot}`);
+        // Setup git if provided, else create directory
+        const { gitUrl, gitBranch = 'main', customCommand = '' } = req.body;
+        if (gitUrl) {
+            const escapedGitUrl = escapeShellArg(gitUrl);
+            const escapedGitBranch = escapeShellArg(gitBranch);
+            const cloneCmd = `
+                set -e
+                if ! command -v git &> /dev/null; then
+                    echo ">> Cài đặt Git..."
+                    if [ -f /etc/debian_version ]; then
+                        while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do sleep 2; done
+                        apt-get update && apt-get install -y git
+                    else
+                        yum install -y git
+                    fi
+                fi
+                mkdir -p $(dirname ${safeRoot})
+                if [ -d "${safeRoot}/.git" ]; then
+                    cd ${safeRoot}
+                    git remote set-url origin ${escapedGitUrl}
+                    git fetch --all
+                    git reset --hard origin/${escapedGitBranch}
+                else
+                    rm -rf ${safeRoot}
+                    git clone -b ${escapedGitBranch} ${escapedGitUrl} ${safeRoot}
+                fi
+                cd ${safeRoot}
+                if [ -f "package.json" ]; then
+                    if ! command -v node &> /dev/null; then
+                        echo ">> Cài đặt Node.js cho dự án..."
+                        if [ -f /etc/debian_version ]; then
+                            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                            apt-get install -y nodejs
+                        else
+                            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+                            yum install -y nodejs
+                        fi
+                    fi
+                    npm install --production || npm install
+                    if npm run | grep -q "build"; then
+                        npm run build
+                    fi
+                fi
+                ${customCommand ? `echo ">> Chạy lệnh tùy chỉnh..."\n${customCommand}` : ''}
+                chown -R www-data:www-data ${safeRoot}
+            `;
+            const gitRes = await ssh.executeCommand(cloneCmd);
+            if (gitRes.code !== 0) {
+                return res.status(500).json({ success: false, error: 'Khởi tạo Git & Clone thất bại', details: gitRes.stderr || gitRes.stdout });
+            }
+        } else {
+            await ssh.executeCommand(`mkdir -p ${safeRoot}`);
+            await ssh.executeCommand(`chown -R www-data:www-data ${safeRoot}`);
+        }
 
         // Write config
         await ssh.executeCommand(`cat > /etc/nginx/sites-available/${safeDomain} << 'EOF'
@@ -238,10 +292,53 @@ EOF`);
         // Test and reload nginx
         await ssh.executeCommand('nginx -t && systemctl reload nginx');
 
+        // Automatically register git webhook if git integration was active
+        if (gitUrl) {
+            const webhooksFilePath = path.join(__dirname, '../data/webhooks.json');
+            let webhooks = [];
+            try {
+                if (fs.existsSync(webhooksFilePath)) {
+                    const fileContent = fs.readFileSync(webhooksFilePath, 'utf8');
+                    webhooks = JSON.parse(fileContent || '[]');
+                }
+            } catch (err) {
+                console.error('Error loading webhooks in addSite:', err);
+            }
+
+            const webhookSecret = crypto.randomBytes(12).toString('hex');
+            const newWebhook = {
+                id: crypto.randomBytes(16).toString('hex'),
+                name: `AutoDeploy - ${safeDomain}`,
+                vpsId: vpsConfig.id || vpsConfig.host,
+                vpsConfig: vpsConfig,
+                targetType: 'webserver',
+                targetName: safeDomain,
+                appPath: root,
+                gitBranch: gitBranch || 'main',
+                webhookSecret: webhookSecret,
+                customCommand: customCommand || '',
+                createdAt: new Date().toISOString(),
+                lastTriggered: null,
+                lastStatus: 'never',
+                history: []
+            };
+
+            webhooks.push(newWebhook);
+            try {
+                if (!fs.existsSync(path.dirname(webhooksFilePath))) {
+                    fs.mkdirSync(path.dirname(webhooksFilePath), { recursive: true });
+                }
+                fs.writeFileSync(webhooksFilePath, JSON.stringify(webhooks, null, 4));
+            } catch (err) {
+                console.error('Error saving webhooks in addSite:', err);
+            }
+        }
+
         logActivity('Tạo Website', `Đã thêm website ${domain} (loại: ${type})`, vpsConfig.id);
         res.json({
             success: true,
-            message: 'Đã thêm website thành công'
+            message: 'Đã thêm website thành công' + (gitUrl ? ' và liên kết Git Auto Deploy thành công!' : ''),
+            gitEnabled: !!gitUrl
         });
 
     } catch (err) {
