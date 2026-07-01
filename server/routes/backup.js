@@ -15,4 +15,10 @@ router.post('/rclone/remotes/delete', BackupController.deleteRcloneRemote);
 router.post('/rclone/remotes/test', BackupController.testRcloneRemote);
 router.post('/rclone/sync-file', BackupController.syncFileToCloud);
 
+// Backup Scheduling Routes
+router.post('/schedule/list', BackupController.listBackupSchedules);
+router.post('/schedule/create', BackupController.createBackupSchedule);
+router.post('/schedule/delete', BackupController.deleteBackupSchedule);
+router.post('/schedule/toggle', BackupController.toggleBackupSchedule);
+
 module.exports = router;

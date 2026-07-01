@@ -3,6 +3,7 @@ const { escapeShellArg } = require('../utils/security');
 const { logActivity } = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const BACKUP_DIR = '/var/www/vps-manager-backups';
 const RUNNER_PATH = `${BACKUP_DIR}/backup-runner.sh`;
@@ -849,6 +850,251 @@ async function syncFileToCloud(req, res) {
     }
 }
 
+const schedulesFilePath = path.join(__dirname, '../data/backup_schedules.json');
+
+function loadSchedules() {
+    try {
+        if (!fs.existsSync(path.dirname(schedulesFilePath))) {
+            fs.mkdirSync(path.dirname(schedulesFilePath), { recursive: true });
+        }
+        if (!fs.existsSync(schedulesFilePath)) {
+            fs.writeFileSync(schedulesFilePath, JSON.stringify([], null, 4));
+            return [];
+        }
+        const data = fs.readFileSync(schedulesFilePath, 'utf8');
+        return JSON.parse(data || '[]');
+    } catch (err) {
+        console.error('Lỗi khi đọc file backup_schedules.json:', err.message);
+        return [];
+    }
+}
+
+function saveSchedules(schedules) {
+    try {
+        fs.writeFileSync(schedulesFilePath, JSON.stringify(schedules, null, 4));
+        return true;
+    } catch (err) {
+        console.error('Lỗi khi ghi file backup_schedules.json:', err.message);
+        return false;
+    }
+}
+
+async function getCrontabText(ssh) {
+    const result = await ssh.executeCommand('crontab -l');
+    if (result.code !== 0) {
+        if (result.stderr.toLowerCase().includes('no crontab')) {
+            return '';
+        }
+        throw new Error(result.stderr || 'Không thể đọc cấu hình crontab');
+    }
+    return result.stdout;
+}
+
+async function saveCrontabText(ssh, text) {
+    const formattedText = text.trim() ? text.trim() + '\n' : '';
+    if (!formattedText) {
+        await ssh.executeCommand('crontab -r');
+        return;
+    }
+    const base64Text = Buffer.from(formattedText).toString('base64');
+    await ssh.executeCommand(`echo "${base64Text}" | base64 -d | crontab -`);
+}
+
+async function listBackupSchedules(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const vpsId = vpsConfig.id || vpsConfig.host;
+        const schedules = loadSchedules();
+        const vpsSchedules = schedules.filter(s => s.vpsId === vpsId);
+        res.json({
+            success: true,
+            data: vpsSchedules
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function createBackupSchedule(req, res) {
+    try {
+        const { vpsConfig, name, type, source, database, dbUser, dbPass, keep = 5, cronExpression, rcloneRemote, rclonePath } = req.body;
+        const vpsId = vpsConfig.id || vpsConfig.host;
+
+        if (!name || !cronExpression || !type || (type !== 'dir' && type !== 'mysql')) {
+            return res.status(400).json({ success: false, error: 'Thiếu thông tin bắt buộc: name, cronExpression, type' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        await ensureBackupScript(ssh);
+
+        const scheduleId = 'sched_' + crypto.randomBytes(6).toString('hex');
+        
+        // Build the runner command
+        let runnerCmd = `/bin/bash ${RUNNER_PATH} --type=${type} --keep=${keep}`;
+        if (type === 'dir') {
+            if (!source) return res.status(400).json({ success: false, error: 'Thiếu đường dẫn thư mục nguồn' });
+            runnerCmd += ` --source=${escapeShellArg(source)}`;
+            runnerCmd += ` --name=${escapeShellArg(name.replace(/\s+/g, '_'))}`;
+        } else if (type === 'mysql') {
+            if (!database) return res.status(400).json({ success: false, error: 'Thiếu tên Database' });
+            runnerCmd += ` --database=${escapeShellArg(database)}`;
+            runnerCmd += ` --db-user=${escapeShellArg(dbUser || 'root')}`;
+            if (dbPass) runnerCmd += ` --db-pass=${escapeShellArg(dbPass)}`;
+        }
+
+        if (rcloneRemote) {
+            runnerCmd += ` --rclone-remote=${escapeShellArg(rcloneRemote)}`;
+            if (rclonePath) {
+                runnerCmd += ` --rclone-path=${escapeShellArg(rclonePath)}`;
+            }
+        }
+
+        // Add redirection to log file
+        runnerCmd += ` > /var/log/vps-backup-${scheduleId}.log 2>&1`;
+
+        // Update crontab
+        const crontabText = await getCrontabText(ssh);
+        const newJob = `# JOB_NAME: VPS_Backup_${scheduleId}\n${cronExpression} ${runnerCmd}`;
+        const updatedCrontab = crontabText.trim() 
+            ? crontabText.trim() + '\n' + newJob 
+            : newJob;
+
+        await saveCrontabText(ssh, updatedCrontab);
+
+        // Save schedule object
+        const schedules = loadSchedules();
+        const newSchedule = {
+            id: scheduleId,
+            name,
+            vpsId,
+            type,
+            source: source || '',
+            database: database || '',
+            dbUser: dbUser || 'root',
+            dbPass: dbPass || '',
+            keep,
+            cronExpression,
+            rcloneRemote: rcloneRemote || '',
+            rclonePath: rclonePath || '',
+            active: true,
+            createdAt: new Date().toISOString()
+        };
+
+        schedules.push(newSchedule);
+        saveSchedules(schedules);
+
+        logActivity('Cấu hình Sao lưu tự động', `Đã lên lịch sao lưu "${name}" (${cronExpression})`, vpsConfig.id);
+        res.json({
+            success: true,
+            message: 'Đã thiết lập lịch sao lưu tự động thành công!',
+            data: newSchedule
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function deleteBackupSchedule(req, res) {
+    try {
+        const { vpsConfig, scheduleId } = req.body;
+        if (!scheduleId) {
+            return res.status(400).json({ success: false, error: 'Thiếu ID lịch sao lưu' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const crontabText = await getCrontabText(ssh);
+        
+        // Remove the cron job lines
+        const lines = crontabText.split('\n');
+        const newLines = [];
+        let skipNext = false;
+        
+        const jobHeader = `# JOB_NAME: VPS_Backup_${scheduleId}`;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line === jobHeader) {
+                skipNext = true;
+                continue;
+            }
+            if (skipNext) {
+                skipNext = false;
+                continue;
+            }
+            newLines.push(lines[i]);
+        }
+
+        await saveCrontabText(ssh, newLines.join('\n'));
+
+        // Remove from json database
+        const schedules = loadSchedules();
+        const filtered = schedules.filter(s => s.id !== scheduleId);
+        saveSchedules(filtered);
+
+        logActivity('Xóa Lịch sao lưu', `Đã xóa lịch sao lưu tự động: ${scheduleId}`, vpsConfig.id);
+        res.json({
+            success: true,
+            message: 'Đã xóa lịch sao lưu tự động thành công!'
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function toggleBackupSchedule(req, res) {
+    try {
+        const { vpsConfig, scheduleId, active } = req.body;
+        if (!scheduleId || active === undefined) {
+            return res.status(400).json({ success: false, error: 'Thiếu ID lịch sao lưu hoặc trạng thái active' });
+        }
+
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const crontabText = await getCrontabText(ssh);
+
+        const lines = crontabText.split('\n');
+        const newLines = [];
+        let found = false;
+
+        const jobHeader = `# JOB_NAME: VPS_Backup_${scheduleId}`;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            newLines.push(line);
+            
+            if (line.trim() === jobHeader && i + 1 < lines.length) {
+                let nextLine = lines[i + 1];
+                const isCurrentlyDisabled = nextLine.trim().startsWith('# DISABLED:');
+                
+                if (active && isCurrentlyDisabled) {
+                    nextLine = nextLine.replace(/^\s*#\s*DISABLED:\s*/, '');
+                } else if (!active && !isCurrentlyDisabled) {
+                    nextLine = `# DISABLED: ${nextLine.trim()}`;
+                }
+                
+                newLines.push(nextLine);
+                i++;
+                found = true;
+            }
+        }
+
+        await saveCrontabText(ssh, newLines.join('\n'));
+
+        // Update database
+        const schedules = loadSchedules();
+        const sched = schedules.find(s => s.id === scheduleId);
+        if (sched) {
+            sched.active = active;
+            saveSchedules(schedules);
+        }
+
+        logActivity('Bật/Tắt Lịch sao lưu', `Đã ${active ? 'kích hoạt' : 'tạm dừng'} lịch sao lưu tự động ${scheduleId}`, vpsConfig.id);
+        res.json({
+            success: true,
+            message: `Đã ${active ? 'kích hoạt' : 'tạm dừng'} lịch sao lưu thành công!`
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 module.exports = {
     listBackups,
     createBackup,
@@ -862,5 +1108,9 @@ module.exports = {
     deleteRcloneRemote,
     testRcloneRemote,
     syncFileToCloud,
+    listBackupSchedules,
+    createBackupSchedule,
+    deleteBackupSchedule,
+    toggleBackupSchedule,
     RUNNER_PATH
 };

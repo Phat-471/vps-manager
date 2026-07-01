@@ -19,7 +19,9 @@ import {
   Cloud,
   ChevronRight,
   ShieldCheck,
-  Server
+  Server,
+  Clock,
+  Calendar
 } from 'lucide-react';
 
 export default function Backups() {
@@ -79,6 +81,24 @@ export default function Backups() {
   const [remoteInputMode, setRemoteInputMode] = useState('form');
   const [testingRemote, setTestingRemote] = useState(null);
 
+  // Scheduling states
+  const [schedules, setSchedules] = useState([]);
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [schedName, setSchedName] = useState('');
+  const [schedType, setSchedType] = useState('dir');
+  const [schedSourceDir, setSchedSourceDir] = useState('/var/www/');
+  const [schedDatabase, setSchedDatabase] = useState('');
+  const [schedDbUser, setSchedDbUser] = useState('root');
+  const [schedDbPass, setSchedDbPass] = useState('');
+  const [schedKeepCount, setSchedKeepCount] = useState(5);
+  const [schedCronType, setSchedCronType] = useState('daily');
+  const [schedCronCustom, setSchedCronCustom] = useState('0 2 * * *');
+  const [schedUseRclone, setSchedUseRclone] = useState(false);
+  const [schedRcloneRemote, setSchedRcloneRemote] = useState('');
+  const [schedRclonePath, setSchedRclonePath] = useState('');
+  const [creatingSchedule, setCreatingSchedule] = useState(false);
+
   // Output terminal logs
   const [runLog, setRunLog] = useState(null);
   const logContainerRef = useRef(null);
@@ -115,10 +135,121 @@ export default function Backups() {
       } catch (dbErr) {
         console.log('Không thể lấy danh sách CSDL (MySQL có thể chưa được cài):', dbErr.message);
       }
+      // Fetch schedules
+      await fetchSchedules();
     } catch (err) {
       console.error('Lỗi nạp dữ liệu Sao lưu:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSchedules = async () => {
+    setSchedulesLoading(true);
+    try {
+      const res = await apiCall('/api/backups/schedule/list', 'POST');
+      if (res.success) {
+        setSchedules(res.data || []);
+      }
+    } catch (err) {
+      console.error('Lỗi nạp lịch sao lưu:', err);
+    } finally {
+      setSchedulesLoading(false);
+    }
+  };
+
+  const handleToggleSchedule = async (id, currentActive) => {
+    try {
+      showToast(`Đang ${currentActive ? 'tạm dừng' : 'kích hoạt'} lịch sao lưu...`, 'info');
+      const res = await apiCall('/api/backups/schedule/toggle', 'POST', {
+        scheduleId: id,
+        active: !currentActive
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        fetchSchedules();
+      }
+    } catch (err) {
+      showToast('Thao tác thất bại: ' + err.message, 'error');
+    }
+  };
+
+  const handleDeleteSchedule = async (id) => {
+    if (!window.confirm('Bạn có chắc muốn xóa lịch sao lưu tự động này?')) return;
+    try {
+      showToast('Đang xóa lịch sao lưu...', 'info');
+      const res = await apiCall('/api/backups/schedule/delete', 'POST', {
+        scheduleId: id
+      });
+      if (res.success) {
+        showToast(res.message, 'success');
+        fetchSchedules();
+      }
+    } catch (err) {
+      showToast('Xóa thất bại: ' + err.message, 'error');
+    }
+  };
+
+  const handleCreateScheduleSubmit = async (e) => {
+    e.preventDefault();
+    setCreatingSchedule(true);
+    showToast('Đang tạo lịch sao lưu tự động trên VPS...', 'info');
+
+    // Build cron expression
+    let cronExpression = '0 2 * * *'; // default daily 2 AM
+    if (schedCronType === 'hourly') {
+      cronExpression = '0 * * * *';
+    } else if (schedCronType === 'weekly') {
+      cronExpression = '0 2 * * 0';
+    } else if (schedCronType === 'custom') {
+      cronExpression = schedCronCustom.trim();
+    }
+
+    const payload = {
+      name: schedName.trim(),
+      type: schedType,
+      keep: schedKeepCount,
+      cronExpression
+    };
+
+    if (schedType === 'dir') {
+      if (!schedSourceDir.trim()) {
+        showToast('Vui lòng nhập đường dẫn thư mục nguồn', 'warning');
+        setCreatingSchedule(false);
+        return;
+      }
+      payload.source = schedSourceDir.trim();
+    } else {
+      if (!schedDatabase) {
+        showToast('Vui lòng chọn Database để sao lưu', 'warning');
+        setCreatingSchedule(false);
+        return;
+      }
+      payload.database = schedDatabase;
+      payload.dbUser = schedDbUser;
+      payload.dbPass = schedDbPass;
+    }
+
+    if (schedUseRclone && schedRcloneRemote) {
+      payload.rcloneRemote = schedRcloneRemote;
+      payload.rclonePath = schedRclonePath;
+    }
+
+    try {
+      const res = await apiCall('/api/backups/schedule/create', 'POST', payload);
+      if (res.success) {
+        showToast('Đã lên lịch sao lưu tự động thành công!', 'success');
+        fetchSchedules();
+        setShowScheduleModal(false);
+        setSchedName('');
+        setSchedSourceDir('/var/www/');
+        setSchedKeepCount(5);
+        setSchedUseRclone(false);
+      }
+    } catch (err) {
+      showToast('Lên lịch thất bại: ' + err.message, 'error');
+    } finally {
+      setCreatingSchedule(false);
     }
   };
 
@@ -437,17 +568,32 @@ export default function Backups() {
         <div className="flex gap-2">
           <button 
             onClick={() => setShowBackupModal(true)} 
-            className="btn btn-primary flex items-center gap-1.5"
+            className="btn btn-primary flex items-center gap-1.5 font-semibold text-xs"
           >
-            <Plus size={16} /> Tạo bản sao lưu mới
+            <Plus size={14} /> Sao lưu thủ công
+          </button>
+          <button 
+            onClick={() => {
+              setSchedName('');
+              setSchedSourceDir('/var/www/');
+              setSchedKeepCount(5);
+              setSchedUseRclone(false);
+              if (databases.length > 0 && !schedDatabase) {
+                setSchedDatabase(databases[0]);
+              }
+              setShowScheduleModal(true);
+            }} 
+            className="btn btn-secondary flex items-center gap-1.5 font-semibold text-xs"
+          >
+            <Clock size={14} /> Lập lịch sao lưu
           </button>
           <button
             onClick={fetchData}
             disabled={loading}
-            className="btn btn-glass flex items-center gap-1.5"
+            className="btn btn-glass flex items-center gap-1.5 font-semibold text-xs"
           >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            Làm mới dữ liệu
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Làm mới
           </button>
         </div>
       </div>
@@ -464,6 +610,17 @@ export default function Backups() {
           style={{ border: 'none', cursor: 'pointer' }}
         >
           <FolderPlus size={16} /> Các bản sao lưu hiện tại
+        </button>
+        <button
+          onClick={() => setActiveTab('schedule')}
+          className={`db-tab-item py-2.5 px-4 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all ${
+            activeTab === 'schedule'
+              ? 'active bg-indigo-500/20 text-indigo-300'
+              : 'text-gray-400 hover:text-white'
+          }`}
+          style={{ border: 'none', cursor: 'pointer' }}
+        >
+          <Clock size={16} /> Tự động sao lưu định kỳ
         </button>
         <button
           onClick={() => setActiveTab('rclone')}
@@ -566,6 +723,117 @@ export default function Backups() {
                             <Trash2 size={14} />
                           </button>
                         </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Backup Schedules List */}
+      {!loading && activeTab === 'schedule' && (
+        <div className="card-glass overflow-hidden rounded-xl">
+          <div className="p-4 border-b border-white/5 bg-white/[0.01] flex justify-between items-center" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-300">Lịch trình sao lưu tự động định kỳ</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Tự động nén dữ liệu và đẩy lên đám mây thông qua Cronjob của hệ thống.</p>
+            </div>
+            <button
+              onClick={() => {
+                setSchedName('');
+                setSchedSourceDir('/var/www/');
+                setSchedKeepCount(5);
+                setSchedUseRclone(false);
+                if (databases.length > 0 && !schedDatabase) {
+                  setSchedDatabase(databases[0]);
+                }
+                setShowScheduleModal(true);
+              }}
+              className="btn btn-primary btn-sm flex items-center gap-1.5 font-semibold text-xs"
+            >
+              <Plus size={14} /> Thêm Lịch trình mới
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-white/5 bg-white/[0.02] text-gray-400 uppercase font-mono text-[11px] tracking-wider">
+                  <th className="p-4">Tên Lịch trình</th>
+                  <th className="p-4">Loại đối tượng</th>
+                  <th className="p-4">Nguồn/Database</th>
+                  <th className="p-4">Tần suất (Cron)</th>
+                  <th className="p-4">Đẩy lên Cloud</th>
+                  <th className="p-4">Trạng thái</th>
+                  <th className="p-4 text-right" style={{ width: '180px' }}>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {schedulesLoading ? (
+                  <tr>
+                    <td colSpan="7" className="p-8 text-center text-gray-400">
+                      <RefreshCw size={20} className="animate-spin mx-auto mb-2 text-indigo-500" />
+                      Đang nạp danh sách lịch trình...
+                    </td>
+                  </tr>
+                ) : schedules.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="p-8 text-center text-gray-400">
+                      Chưa cấu hình lịch trình sao lưu tự động nào. Hãy bấm "Thêm Lịch trình mới" để thiết lập.
+                    </td>
+                  </tr>
+                ) : (
+                  schedules.map((sched) => (
+                    <tr key={sched.id} className="hover:bg-white/[0.01] transition-all">
+                      <td className="p-4 font-semibold text-gray-200">{sched.name}</td>
+                      <td className="p-4">
+                        {sched.type === 'dir' ? (
+                          <span className="badge text-amber-300 bg-amber-400/10 px-2 py-0.5 rounded text-xs flex items-center gap-1 w-max">
+                            <Folder size={12} /> Folder
+                          </span>
+                        ) : (
+                          <span className="badge text-indigo-300 bg-indigo-400/10 px-2 py-0.5 rounded text-xs flex items-center gap-1 w-max">
+                            <Database size={12} /> MySQL
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 font-mono text-xs text-gray-300">
+                        {sched.type === 'dir' ? sched.source : sched.database}
+                      </td>
+                      <td className="p-4 font-mono text-xs text-indigo-300" title="Thời gian chạy theo múi giờ máy chủ">
+                        {sched.cronExpression}
+                      </td>
+                      <td className="p-4">
+                        {sched.rcloneRemote ? (
+                          <span className="text-green-300 flex items-center gap-1 text-xs">
+                            <Cloud size={12} /> {sched.rcloneRemote}:{sched.rclonePath || '/'}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500 text-xs">Chỉ lưu local</span>
+                        )}
+                      </td>
+                      <td className="p-4">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSchedule(sched.id, sched.active)}
+                          className={`btn btn-xs ${sched.active ? 'btn-success bg-green-500/10 text-green-300' : 'btn-secondary bg-gray-500/10 text-gray-400'}`}
+                          style={{ padding: '2px 8px', fontSize: 11, cursor: 'pointer', border: 'none' }}
+                        >
+                          {sched.active ? '● Hoạt động' : '○ Tạm dừng'}
+                        </button>
+                      </td>
+                      <td className="p-4 text-right">
+                        <button
+                          onClick={() => handleDeleteSchedule(sched.id)}
+                          className="btn btn-glass btn-sm text-red-400"
+                          title="Xóa lịch trình sao lưu"
+                          style={{ padding: '6px' }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -725,6 +993,220 @@ export default function Backups() {
           <pre ref={logContainerRef} className="p-4 bg-black/60 text-emerald-400 font-mono text-xs rounded-lg max-h-[300px] overflow-y-auto whitespace-pre-wrap border border-white/5">
             {runLog}
           </pre>
+        </div>
+      )}
+
+      {/* MODAL: Create Schedule Backup */}
+      {showScheduleModal && (
+        <div className="modal-overlay">
+          <div className="modal-content card-glass p-6 max-w-md w-full rounded-xl space-y-4">
+            <div className="flex justify-between items-center border-b border-white/10 pb-3" style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '12px' }}>
+              <h2 className="text-lg font-bold text-gray-200 flex items-center gap-2">
+                <Clock size={20} className="text-indigo-400" />
+                Lập lịch sao lưu tự động
+              </h2>
+              <button onClick={() => setShowScheduleModal(false)} className="text-gray-400 hover:text-white" style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateScheduleSubmit} className="space-y-4 text-sm">
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium">Tên Lịch trình (để quản lý):</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="VD: Backup Daily Website, Backup DB Weekly"
+                  value={schedName}
+                  onChange={(e) => setSchedName(e.target.value)}
+                  className="input-glass w-full"
+                  style={{ padding: '8px' }}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium">Loại đối tượng sao lưu:</label>
+                <select
+                  value={schedType}
+                  onChange={(e) => setSchedType(e.target.value)}
+                  className="input-glass w-full"
+                  style={{ padding: '8px' }}
+                >
+                  <option value="dir">Thư mục nguồn (Mã nguồn)</option>
+                  <option value="mysql">Database MySQL (Cơ sở dữ liệu)</option>
+                </select>
+              </div>
+
+              {schedType === 'dir' ? (
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-medium">Đường dẫn thư mục nguồn trên VPS:</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="VD: /var/www/mywebsite.com"
+                    value={schedSourceDir}
+                    onChange={(e) => setSchedSourceDir(e.target.value)}
+                    className="input-glass w-full font-mono text-xs"
+                    style={{ padding: '8px' }}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-gray-400 font-medium">Chọn Database cần sao lưu:</label>
+                    {databases.length === 0 ? (
+                      <div className="text-xs text-yellow-400 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded">
+                        Không phát hiện cơ sở dữ liệu MySQL hoạt động trên VPS.
+                      </div>
+                    ) : (
+                      <select
+                        value={schedDatabase}
+                        onChange={(e) => setSchedDatabase(e.target.value)}
+                        className="input-glass w-full"
+                        style={{ padding: '8px' }}
+                      >
+                        {databases.map(db => (
+                          <option key={db} value={db}>{db}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-gray-400 font-medium text-xs">MySQL User (Thường là root):</label>
+                    <input
+                      type="text"
+                      value={schedDbUser}
+                      onChange={(e) => setSchedDbUser(e.target.value)}
+                      className="input-glass w-full text-xs"
+                      style={{ padding: '6px' }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-gray-400 font-medium text-xs">MySQL Password:</label>
+                    <input
+                      type="password"
+                      placeholder="Mật khẩu MySQL (để trống nếu dùng auth socket)"
+                      value={schedDbPass}
+                      onChange={(e) => setSchedDbPass(e.target.value)}
+                      className="input-glass w-full text-xs"
+                      style={{ padding: '6px' }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium">Tần suất chạy (Time Schedule):</label>
+                <select
+                  value={schedCronType}
+                  onChange={(e) => setSchedCronType(e.target.value)}
+                  className="input-glass w-full"
+                  style={{ padding: '8px' }}
+                >
+                  <option value="hourly">Mỗi giờ một lần (Hourly)</option>
+                  <option value="daily">Hàng ngày lúc 02:00 sáng (Daily)</option>
+                  <option value="weekly">Hàng tuần lúc 02:00 sáng Chủ Nhật (Weekly)</option>
+                  <option value="custom">Biểu thức Cron tùy chỉnh (Custom Cron)</option>
+                </select>
+              </div>
+
+              {schedCronType === 'custom' && (
+                <div className="space-y-1">
+                  <label className="text-gray-400 font-medium font-mono text-xs">Nhập biểu thức Cron:</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="VD: 0 0 * * * (chạy vào nửa đêm hàng ngày)"
+                    value={schedCronCustom}
+                    onChange={(e) => setSchedCronCustom(e.target.value)}
+                    className="input-glass w-full font-mono text-xs"
+                    style={{ padding: '8px' }}
+                  />
+                  <p className="text-[10px] text-gray-500">Định dạng tiêu chuẩn: Phút Giờ Ngày Tháng Thứ.</p>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-gray-400 font-medium">Giới hạn số bản sao lưu local giữ lại:</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={schedKeepCount}
+                  onChange={(e) => setSchedKeepCount(parseInt(e.target.value) || 5)}
+                  className="input-glass w-full"
+                  style={{ padding: '8px' }}
+                />
+              </div>
+
+              {/* Rclone Sync */}
+              {rcloneStatus.installed && Object.keys(remotes).length > 0 && (
+                <div className="pt-2 border-t border-white/5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="sched_use_rclone"
+                      checked={schedUseRclone}
+                      onChange={(e) => setSchedUseRclone(e.target.checked)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <label htmlFor="sched_use_rclone" className="text-gray-300 font-medium cursor-pointer text-xs">
+                      Tự động tải lên đám mây (Cloud Sync)
+                    </label>
+                  </div>
+
+                  {schedUseRclone && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-gray-400 text-xs">Chọn Cloud Remote:</label>
+                        <select
+                          value={schedRcloneRemote}
+                          onChange={(e) => setSchedRcloneRemote(e.target.value)}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        >
+                          <option value="">-- Chọn Remote --</option>
+                          {Object.keys(remotes).map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-gray-400 text-xs">Thư mục trên Cloud (Path):</label>
+                        <input
+                          type="text"
+                          placeholder="VD: backup/web"
+                          value={schedRclonePath}
+                          onChange={(e) => setSchedRclonePath(e.target.value)}
+                          className="input-glass w-full text-xs"
+                          style={{ padding: '6px' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-white/10 flex justify-end gap-2" style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowScheduleModal(false)}
+                  className="btn btn-secondary font-semibold"
+                  style={{ padding: '8px 16px' }}
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingSchedule}
+                  className="btn btn-primary font-semibold"
+                  style={{ padding: '8px 16px' }}
+                >
+                  {creatingSchedule ? 'Đang thiết lập...' : 'Thiết lập Lịch trình'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
