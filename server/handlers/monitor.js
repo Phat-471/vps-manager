@@ -79,13 +79,9 @@ disk_pct=\$(echo "\$disk_pct_raw" | sed 's/%//')
 uptime_sec=\$(cat /proc/uptime | awk '{print int(\$1)}')
 
 mem_used_pct=\$(( mem_used * 100 / mem_total ))
-if [ "\$cpu_usage" -gt 90 ] || [ "\$mem_used_pct" -gt 90 ] 2>/dev/null; then
-    top_cpu=\$(ps -Ao pid,pcpu,pmem,comm --sort=-pcpu | head -n 6 | tail -n 5 | awk '{print \$1\",\"\$2\",\"\$3\",\"\$4}' | tr '\\n' ';')
-    top_mem=\$(ps -Ao pid,pcpu,pmem,comm --sort=-pmem | head -n 6 | tail -n 5 | awk '{print \$1\",\"\$2\",\"\$3\",\"\$4}' | tr '\\n' ';')
-else
-    top_cpu=""
-    top_mem=""
-fi
+top_cpu=\$(ps -Ao pid,pcpu,pmem,comm --sort=-pcpu | head -n 6 | tail -n 5 | awk '{print \$1\",\"\$2\",\"\$3\",\"\$4}' | tr '\\n' ';')
+top_mem=\$(ps -Ao pid,pcpu,pmem,comm --sort=-pmem | head -n 6 | tail -n 5 | awk '{print \$1\",\"\$2\",\"\$3\",\"\$4}' | tr '\\n' ';')
+top_disk=\$(du -d 1 -h /var/www 2>/dev/null | sort -rh | head -n 6 | tail -n +2 | awk '{print \$2\",\"\$1}' | tr '\\n' ';')
 
 echo "CPU_USAGE:\$cpu_usage"
 echo "CPU_CORES:\$cpu_cores"
@@ -98,6 +94,7 @@ echo "DISK_PCT:\$disk_pct"
 echo "UPTIME:\$uptime_sec"
 echo "TOP_CPU:\$top_cpu"
 echo "TOP_MEM:\$top_mem"
+echo "TOP_DISK:\$top_disk"
 `;
 
     // Ensure state map has the entry for this VPS
@@ -230,6 +227,7 @@ echo "TOP_MEM:\$top_mem"
             const uptimeSec = parseInt(stats['UPTIME']) || 0;
             const topCpuRaw = stats['TOP_CPU'] || '';
             const topMemRaw = stats['TOP_MEM'] || '';
+            const topDiskRaw = stats['TOP_DISK'] || '';
 
             // Parse top processes "pid,cpu,mem,name;..."
             const parseTopProcesses = (rawStr) => {
@@ -245,8 +243,20 @@ echo "TOP_MEM:\$top_mem"
                 });
             };
 
+            const parseTopDisk = (rawStr) => {
+                if (!rawStr) return [];
+                return rawStr.split(';').filter(Boolean).map(p => {
+                    const [name, size] = p.split(',');
+                    return {
+                        name: name || 'unknown',
+                        size: size || '0'
+                    };
+                });
+            };
+
             const topCpu = parseTopProcesses(topCpuRaw);
             const topMem = parseTopProcesses(topMemRaw);
+            const topDisk = parseTopDisk(topDiskRaw);
 
             const data = {
                 timestamp: Date.now(),
@@ -267,7 +277,8 @@ echo "TOP_MEM:\$top_mem"
                 },
                 uptime: uptimeSec,
                 topCpu,
-                topMem
+                topMem,
+                topDisk
             };
 
             state.lastData = data;

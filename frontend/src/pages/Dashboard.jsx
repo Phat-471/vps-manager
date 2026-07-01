@@ -51,6 +51,9 @@ export default function Dashboard() {
   const [logs, setLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
 
+  // Modal for resource details (CPU/RAM/Disk processes)
+  const [activeDetailType, setActiveDetailType] = useState(null); // 'cpu' | 'ram' | 'disk' | null
+
   const fetchChecklist = async () => {
     setLoadingChecklist(true);
     try {
@@ -960,7 +963,7 @@ export default function Dashboard() {
         <div className="card stat-circle-card">
           <div className="stat-card-title">
             <span>CPU Usage</span>
-            <span className="more-options">•••</span>
+            <span className="more-options" style={{ cursor: 'pointer' }} onClick={() => setActiveDetailType('cpu')}>•••</span>
           </div>
           <div className="stat-circle-container">
             <svg className="stat-circle-svg" viewBox="0 0 100 100">
@@ -989,7 +992,7 @@ export default function Dashboard() {
         <div className="card stat-circle-card">
           <div className="stat-card-title">
             <span>RAM Usage</span>
-            <span className="more-options">•••</span>
+            <span className="more-options" style={{ cursor: 'pointer' }} onClick={() => setActiveDetailType('ram')}>•••</span>
           </div>
           <div className="stat-circle-container">
             <svg className="stat-circle-svg" viewBox="0 0 100 100">
@@ -1018,7 +1021,7 @@ export default function Dashboard() {
         <div className="card stat-circle-card">
           <div className="stat-card-title">
             <span>Disk Usage</span>
-            <span className="more-options">•••</span>
+            <span className="more-options" style={{ cursor: 'pointer' }} onClick={() => setActiveDetailType('disk')}>•••</span>
           </div>
           <div className="stat-circle-container">
             <svg className="stat-circle-svg" viewBox="0 0 100 100">
@@ -1438,6 +1441,116 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal chi tiết tiến trình / tài nguyên */}
+      {activeDetailType && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ width: '550px' }}>
+            <div className="modal-header">
+              <h2>
+                {activeDetailType === 'cpu' && 'Chi tiết Tiến trình sử dụng CPU'}
+                {activeDetailType === 'ram' && 'Chi tiết Tiến trình sử dụng RAM'}
+                {activeDetailType === 'disk' && 'Chi tiết Dung lượng thư mục (/var/www)'}
+              </h2>
+              <button onClick={() => setActiveDetailType(null)} className="modal-close-btn">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body py-4">
+              {activeDetailType === 'cpu' && (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-400">Top 5 tiến trình đang tiêu thụ nhiều CPU nhất trên hệ thống.</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '8px 12px', fontWeight: '600' }}>Tên Tiến Trình</th>
+                        <th style={{ padding: '8px 12px', fontWeight: '600' }}>PID</th>
+                        <th style={{ padding: '8px 12px', fontWeight: '600', textAlign: 'right' }}>% CPU</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monitorData?.topCpu && monitorData.topCpu.length > 0 ? (
+                        monitorData.topCpu.map((p, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }}>
+                            <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: '600', color: '#a5b4fc' }}>{p.name}</td>
+                            <td style={{ padding: '10px 12px', color: '#cbd5e1' }}>{p.pid}</td>
+                            <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#a855f7' }}>{p.cpu}%</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="3" style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>Chưa có dữ liệu tiến trình</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeDetailType === 'ram' && (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-400">Top 5 tiến trình đang tiêu thụ nhiều bộ nhớ RAM nhất trên hệ thống.</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '8px 12px', fontWeight: '600' }}>Tên Tiến Trình</th>
+                        <th style={{ padding: '8px 12px', fontWeight: '600' }}>PID</th>
+                        <th style={{ padding: '8px 12px', fontWeight: '600', textAlign: 'right' }}>% RAM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monitorData?.topMem && monitorData.topMem.length > 0 ? (
+                        monitorData.topMem.map((p, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }}>
+                            <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: '600', color: '#a5b4fc' }}>{p.name}</td>
+                            <td style={{ padding: '10px 12px', color: '#cbd5e1' }}>{p.pid}</td>
+                            <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#06b6d4' }}>{p.mem}%</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="3" style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>Chưa có dữ liệu tiến trình</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {activeDetailType === 'disk' && (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-400">Chi tiết dung lượng thư mục của các website chạy trên VPS (thư mục `/var/www`).</p>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: '8px 12px', fontWeight: '600' }}>Thư mục website</th>
+                        <th style={{ padding: '8px 12px', fontWeight: '600', textAlign: 'right' }}>Dung lượng</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monitorData?.topDisk && monitorData.topDisk.length > 0 ? (
+                        monitorData.topDisk.map((d, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#e2e8f0' }}>
+                            <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#cbd5e1' }}>{d.name}</td>
+                            <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 'bold', color: '#f97316' }}>{d.size}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="2" style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>Chưa có dữ liệu thư mục (hoặc thư mục trống)</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setActiveDetailType(null)}>Đóng</button>
+            </div>
           </div>
         </div>
       )}
