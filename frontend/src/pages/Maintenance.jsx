@@ -39,7 +39,12 @@ export default function Maintenance() {
     { key: 'pm2', name: 'PM2 Process Manager', desc: 'Quản lý tiến trình ứng dụng NodeJS', installEndpoint: '/api/software/install-pm2' },
     { key: 'git', name: 'Git Version Control', desc: 'Hệ thống quản lý phiên bản mã nguồn', installEndpoint: '/api/software/install-git' },
     { key: 'certbot', name: 'Certbot SSL (Let\'s Encrypt)', desc: 'Tự động tạo và gia hạn chứng chỉ SSL miễn phí', installEndpoint: '/api/software/install-certbot' },
-    { key: 'composer', name: 'Composer PHP', desc: 'Bộ quản lý thư viện dependency cho PHP', installEndpoint: '/api/software/install-composer' }
+    { key: 'composer', name: 'Composer PHP', desc: 'Bộ quản lý thư viện dependency cho PHP', installEndpoint: '/api/software/install-composer' },
+    { key: 'rsync', name: 'Rsync File Sync', desc: 'Đồng bộ và sao chép tệp tin tốc độ cao, an toàn', installEndpoint: '/api/software/install-rsync' },
+    { key: 'ufw', name: 'UFW Firewall', desc: 'Công cụ tường lửa đơn giản bảo vệ cổng kết nối VPS', installEndpoint: '/api/software/install-ufw' },
+    { key: 'supervisor', name: 'Supervisor Manager', desc: 'Quản lý và giám sát các tiến trình chạy ngầm', installEndpoint: '/api/software/install-supervisor' },
+    { key: 'rclone', name: 'Rclone Sync', desc: 'Đồng bộ dữ liệu VPS lên Google Drive, OneDrive,...', installEndpoint: '/api/software/install-rclone' },
+    { key: 'netdata', name: 'Netdata Monitor', desc: 'Giám sát hệ thống thời gian thực qua giao diện web trực quan', installEndpoint: '/api/software/install-netdata' }
   ];
 
   useEffect(() => {

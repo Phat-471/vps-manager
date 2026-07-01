@@ -543,7 +543,12 @@ async function getInstalledSoftware(req, res) {
             { name: 'java', command: 'java -version 2>&1 | head -1' },
             { name: 'apache2', command: 'apache2 -v 2>&1 | head -1' },
             { name: 'fail2ban-client', command: 'fail2ban-client --version 2>&1 | head -1' },
-            { name: 'go', command: 'go version 2>&1 | head -1' }
+            { name: 'go', command: 'go version 2>&1 | head -1' },
+            { name: 'rsync', command: 'rsync --version | head -1' },
+            { name: 'ufw', command: 'ufw --version | head -1' },
+            { name: 'supervisord', command: 'supervisord -v 2>&1' },
+            { name: 'rclone', command: 'rclone --version | head -1' },
+            { name: 'netdata', command: 'netdata -V 2>&1' }
         ];
 
         // Check all software in parallel
@@ -588,7 +593,12 @@ async function getInstalledSoftware(req, res) {
             java: installed.java?.installed,
             apache: installed.apache2?.installed,
             fail2ban: installed['fail2ban-client']?.installed,
-            golang: installed.go?.installed
+            golang: installed.go?.installed,
+            rsync: installed.rsync?.installed,
+            ufw: installed.ufw?.installed,
+            supervisor: installed.supervisord?.installed,
+            rclone: installed.rclone?.installed,
+            netdata: installed.netdata?.installed
         };
 
         res.json({
@@ -732,6 +742,87 @@ async function installGolang(req, res) {
     }
 }
 
+async function installRsync(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y rsync
+            rsync --version | head -1
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt Rsync thành công', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installUFW(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y ufw
+            ufw --version | head -1
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt UFW Firewall thành công', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installSupervisor(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y supervisor
+            systemctl enable supervisor
+            systemctl start supervisor
+            supervisord -v
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt Supervisor thành công', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installRclone(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            curl https://rclone.org/install.sh | bash
+            rclone --version | head -1
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt Rclone thành công', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installNetdata(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            wget -O /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh
+            sh /tmp/netdata-kickstart.sh --non-interactive
+            netdata -V
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt Netdata thành công', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
 async function uninstallSoftware(req, res) {
     try {
         const { vpsConfig, softwareId } = req.body;
@@ -755,7 +846,12 @@ async function uninstallSoftware(req, res) {
             certbot: 'apt-get purge -y certbot python3-certbot-nginx && apt-get autoremove -y',
             composer: 'rm -f /usr/local/bin/composer',
             apache: 'apt-get purge -y apache2 && apt-get autoremove -y',
-            lemp: 'apt-get purge -y nginx nginx-common nginx-core mysql-server mysql-client mysql-common php-fpm php-cli php-common php-mysql && apt-get autoremove -y'
+            lemp: 'apt-get purge -y nginx nginx-common nginx-core mysql-server mysql-client mysql-common php-fpm php-cli php-common php-mysql && apt-get autoremove -y',
+            rsync: 'apt-get purge -y rsync && apt-get autoremove -y',
+            ufw: 'apt-get purge -y ufw && apt-get autoremove -y',
+            supervisor: 'apt-get purge -y supervisor && apt-get autoremove -y',
+            rclone: 'rm -f /usr/bin/rclone /usr/local/bin/rclone /usr/share/man/man1/rclone.1',
+            netdata: 'wget -O /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh && sh /tmp/netdata-kickstart.sh --uninstall --non-interactive || apt-get purge -y netdata'
         };
 
         const cmd = uninstallCmds[softwareId];
@@ -798,5 +894,10 @@ module.exports = {
     installApache,
     installFail2Ban,
     installGolang,
+    installRsync,
+    installUFW,
+    installSupervisor,
+    installRclone,
+    installNetdata,
     uninstallSoftware
 };

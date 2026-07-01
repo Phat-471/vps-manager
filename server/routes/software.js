@@ -26,6 +26,11 @@ router.post('/install-java', SoftwareController.installJava);
 router.post('/install-apache', SoftwareController.installApache);
 router.post('/install-fail2ban', SoftwareController.installFail2Ban);
 router.post('/install-golang', SoftwareController.installGolang);
+router.post('/install-rsync', SoftwareController.installRsync);
+router.post('/install-ufw', SoftwareController.installUFW);
+router.post('/install-supervisor', SoftwareController.installSupervisor);
+router.post('/install-rclone', SoftwareController.installRclone);
+router.post('/install-netdata', SoftwareController.installNetdata);
 router.post('/installed', SoftwareController.getInstalledSoftware);
 router.post('/uninstall', SoftwareController.uninstallSoftware);
 
