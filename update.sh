@@ -24,6 +24,8 @@ cd /var/www/vps-manager || exit
 if [ -d "/var/www/vps-manager/.git" ]; then
     echo -e "${YELLOW}>> Phát hiện chế độ cài đặt từ Nguồn Git. Đang cập nhật...${NC}"
     
+    PREV_COMMIT=$(git rev-parse HEAD)
+    
     echo -e "${YELLOW}1. Đang dọn dẹp thay đổi tạm thời...${NC}"
     HAS_STASH=0
     if git status --porcelain | grep -q '^[MADRCU?]'; then
@@ -44,7 +46,40 @@ if [ -d "/var/www/vps-manager/.git" ]; then
     echo -e "${YELLOW}3. Cập nhật các thư viện thiết yếu (Production Only)...${NC}"
     npm install --omit=dev
     
-    echo -e "${YELLOW}4. Khởi động lại ứng dụng để áp dụng thay đổi...${NC}"
+    echo -e "${YELLOW}4. Kiểm tra cú pháp mã nguồn mới...${NC}"
+    SYNTAX_ERROR=0
+    # Tìm kiếm các file Javascript trong thư mục server
+    for js_file in $(find server -name "*.js"); do
+        if ! node -c "$js_file" >/dev/null 2>&1; then
+            echo -e "${RED}Lỗi cú pháp tại tệp: $js_file${NC}"
+            SYNTAX_ERROR=1
+        fi
+    done
+    
+    if [ "$SYNTAX_ERROR" -eq 1 ]; then
+        echo -e "${RED}Lỗi: Bản cập nhật chứa lỗi cú pháp nghiêm trọng! Đang tự động Rollback về Commit $PREV_COMMIT...${NC}"
+        git reset --hard "$PREV_COMMIT"
+        npm install --omit=dev
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}5. Khởi chạy thử nghiệm Panel...${NC}"
+    PORT=9991 node server/server.js > /tmp/vps-manager-test.log 2>&1 &
+    TEST_PID=$!
+    sleep 4
+    if kill -0 $TEST_PID 2>/dev/null; then
+        kill $TEST_PID
+        echo -e "${GREEN}>> Thử nghiệm khởi chạy thành công!${NC}"
+    else
+        echo -e "${RED}Lỗi: Phiên bản mới bị sập ngay khi khởi động. Chi tiết lỗi:${NC}"
+        cat /tmp/vps-manager-test.log
+        echo -e "${RED}Đang tự động Rollback về Commit $PREV_COMMIT...${NC}"
+        git reset --hard "$PREV_COMMIT"
+        npm install --omit=dev
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}6. Khởi động lại ứng dụng để áp dụng thay đổi...${NC}"
     if systemctl is-active --quiet vps-manager; then
         echo -e "${GREEN}Khởi động lại bằng Systemd Service...${NC}"
         systemctl restart vps-manager
@@ -63,13 +98,19 @@ elif [ -f "/var/www/vps-manager/package.json" ]; then
     [ -f /var/www/vps-manager/.env ] && cp /var/www/vps-manager/.env /tmp/vps_manager_update_bak/.env
     [ -d /var/www/vps-manager/uploads ] && cp -rf /var/www/vps-manager/uploads /tmp/vps_manager_update_bak/uploads
     
+    # Sao lưu rollback phòng hờ lỗi
+    ROLLBACK_DIR="/var/www/vps-manager-rollback-bak"
+    rm -rf "$ROLLBACK_DIR"
+    mkdir -p "$ROLLBACK_DIR"
+    cp -rf /var/www/vps-manager/* "$ROLLBACK_DIR/" 2>/dev/null
+    
     echo -e "${YELLOW}2. Đang tải ZIP mã nguồn mới từ GitHub...${NC}"
     TMP_ZIP="/tmp/vps-manager-update.zip"
     curl -sSL "https://github.com/Phat-471/vps-manager/archive/refs/heads/main.zip" -o "$TMP_ZIP"
     
     if [ ! -f "$TMP_ZIP" ] || [ ! -s "$TMP_ZIP" ]; then
         echo -e "${RED}Lỗi: Không tải được mã nguồn từ GitHub! Hủy cập nhật.${NC}"
-        rm -rf /tmp/vps_manager_update_bak
+        rm -rf /tmp/vps_manager_update_bak "$ROLLBACK_DIR"
         exit 1
     fi
     
@@ -82,7 +123,7 @@ elif [ -f "/var/www/vps-manager/package.json" ]; then
     SRC_DIR=$(find "$TMP_DIR" -maxdepth 2 -name "package.json" -exec dirname {} \; | head -n1)
     if [ -z "$SRC_DIR" ]; then
         echo -e "${RED}Lỗi: ZIP tải về không hợp lệ! Hủy cập nhật.${NC}"
-        rm -rf /tmp/vps_manager_update_bak "$TMP_DIR"
+        rm -rf /tmp/vps_manager_update_bak "$TMP_DIR" "$ROLLBACK_DIR"
         exit 1
     fi
     
@@ -98,7 +139,42 @@ elif [ -f "/var/www/vps-manager/package.json" ]; then
     echo -e "${YELLOW}6. Cập nhật các thư viện thiết yếu (Production Only)...${NC}"
     npm install --omit=dev
     
-    echo -e "${YELLOW}7. Khởi động lại ứng dụng để áp dụng thay đổi...${NC}"
+    echo -e "${YELLOW}7. Kiểm tra cú pháp mã nguồn mới...${NC}"
+    SYNTAX_ERROR=0
+    for js_file in $(find server -name "*.js"); do
+        if ! node -c "$js_file" >/dev/null 2>&1; then
+            echo -e "${RED}Lỗi cú pháp tại tệp: $js_file${NC}"
+            SYNTAX_ERROR=1
+        fi
+    done
+    
+    if [ "$SYNTAX_ERROR" -eq 1 ]; then
+        echo -e "${RED}Lỗi: Bản cập nhật chứa lỗi cú pháp nghiêm trọng! Đang tự động Rollback...${NC}"
+        cp -rf "$ROLLBACK_DIR"/* /var/www/vps-manager/
+        npm install --omit=dev
+        rm -rf "$ROLLBACK_DIR"
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}8. Khởi chạy thử nghiệm Panel...${NC}"
+    PORT=9991 node server/server.js > /tmp/vps-manager-test.log 2>&1 &
+    TEST_PID=$!
+    sleep 4
+    if kill -0 $TEST_PID 2>/dev/null; then
+        kill $TEST_PID
+        echo -e "${GREEN}>> Thử nghiệm khởi chạy thành công!${NC}"
+        rm -rf "$ROLLBACK_DIR"
+    else
+        echo -e "${RED}Lỗi: Phiên bản mới bị sập ngay khi khởi động. Chi tiết lỗi:${NC}"
+        cat /tmp/vps-manager-test.log
+        echo -e "${RED}Đang tự động Rollback mã nguồn cũ...${NC}"
+        cp -rf "$ROLLBACK_DIR"/* /var/www/vps-manager/
+        npm install --omit=dev
+        rm -rf "$ROLLBACK_DIR"
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}9. Khởi động lại ứng dụng để áp dụng thay đổi...${NC}"
     if systemctl is-active --quiet vps-manager; then
         systemctl restart vps-manager
     elif command -v pm2 &> /dev/null; then
@@ -114,7 +190,6 @@ else
     BINARY_URL=$(echo "$LATEST_RELEASE_JSON" | grep "browser_download_url" | cut -d '"' -f 4 | grep "vps-manager")
     
     if [ -z "$BINARY_URL" ]; then
-        # Mặc định fallback nếu không lấy được qua grep
         BINARY_URL="https://github.com/Phat-471/vps-manager/releases/latest/download/vps-manager"
     fi
     
@@ -127,11 +202,29 @@ else
         exit 1
     fi
     
-    echo -e "${YELLOW}3. Đang ghi đè và thiết lập quyền cho tệp nhị phân...${NC}"
+    echo -e "${YELLOW}3. Sao lưu tệp nhị phân hiện tại để dự phòng...${NC}"
+    [ -f /usr/local/bin/vps-manager ] && cp -f /usr/local/bin/vps-manager /usr/local/bin/vps-manager.bak
+    
+    echo -e "${YELLOW}4. Đang ghi đè và thiết lập quyền cho tệp nhị phân...${NC}"
     mv -f /usr/local/bin/vps-manager.tmp /usr/local/bin/vps-manager
     chmod +x /usr/local/bin/vps-manager
     
-    echo -e "${YELLOW}4. Khởi động lại dịch vụ hệ thống vps-manager...${NC}"
+    echo -e "${YELLOW}5. Khởi chạy thử nghiệm tệp nhị phân...${NC}"
+    PORT=9991 /usr/local/bin/vps-manager > /tmp/vps-manager-test.log 2>&1 &
+    TEST_PID=$!
+    sleep 4
+    if kill -0 $TEST_PID 2>/dev/null; then
+        kill $TEST_PID
+        echo -e "${GREEN}>> Thử nghiệm khởi chạy nhị phân thành công!${NC}"
+        rm -f /usr/local/bin/vps-manager.bak
+    else
+        echo -e "${RED}Lỗi: Tệp nhị phân mới bị sập khi khởi chạy. Đang khôi phục lại...${NC}"
+        cat /tmp/vps-manager-test.log
+        [ -f /usr/local/bin/vps-manager.bak ] && mv -f /usr/local/bin/vps-manager.bak /usr/local/bin/vps-manager
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}6. Khởi động lại dịch vụ hệ thống vps-manager...${NC}"
     if systemctl is-active --quiet vps-manager; then
         systemctl restart vps-manager
         echo -e "${GREEN}Đã khởi động lại vps-manager.service thành công!${NC}"
