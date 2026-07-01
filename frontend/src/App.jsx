@@ -25,6 +25,7 @@ import AppInstaller from './pages/AppInstaller';
 import Webhooks from './pages/Webhooks';
 import Backups from './pages/Backups';
 import CentralMonitor from './pages/CentralMonitor';
+import Guides from './pages/Guides';
 import './index.css';
 
 const pageMap = {
@@ -49,6 +50,7 @@ const pageMap = {
   terminal: <Terminal />,
   scripts: <Scripts />,
   maintenance: <Maintenance />,
+  guides: <Guides />,
 };
 
 function AppShell() {

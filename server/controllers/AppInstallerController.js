@@ -378,7 +378,8 @@ async function prepareInstallation(req, res) {
             pmaUser,
             pmaPassword,
             phpVersion,
-            ssl
+            ssl,
+            ecoMode = false
         } = req.body;
         const host = vpsConfig?.host || 'localhost';
 
@@ -1271,6 +1272,14 @@ EOF
                     useradd -m -s /bin/bash pm2user
                 fi
                 pm2 startup systemd -u pm2user --hp /home/pm2user || pm2 startup systemd || true
+                
+                ${(ecoMode === true || ecoMode === 'true') ? `
+                echo ">> Cấu hình Chế độ Tối ưu (Eco Mode): Tự động nén và quản lý logs PM2..."
+                pm2 install pm2-logrotate || true
+                pm2 set pm2-logrotate:max_size 10M || true
+                pm2 set pm2-logrotate:retain 5 || true
+                ` : ''}
+
                 pm2 save --force || true
                 pm2 --version
                 echo "=== CÀI ĐẶT PM2 HOÀN TẤT ==="
@@ -1427,6 +1436,22 @@ EOF
                         systemctl enable mysqld || true
                     fi
                 fi
+
+                ${(ecoMode === true || ecoMode === 'true') ? `
+                echo ">> Cấu hình Chế độ Tối ưu (Eco Mode): Tắt Performance Schema & Giới hạn RAM CSDL..."
+                mkdir -p /etc/mysql/conf.d
+                cat > /etc/mysql/conf.d/eco.cnf << 'EOF'
+[mysqld]
+performance_schema = OFF
+key_buffer_size = 16M
+max_connections = 50
+innodb_buffer_pool_size = 64M
+innodb_log_buffer_size = 8M
+innodb_file_per_table = 1
+EOF
+                systemctl restart mysql || systemctl restart mariadb || systemctl restart mysqld || true
+                ` : ''}
+
                 echo "=== CÀI ĐẶT DATABASE HOÀN TẤT ==="
             `;
             return res.json({ success: true, command: command.trim(), data: {} });
@@ -1510,7 +1535,7 @@ EOF
                     docker start grafana
                 else
                     echo ">> Khởi chạy Grafana container..."
-                    docker run -d --name grafana -p ${safePort}:3000 --restart always grafana/grafana-oss:latest
+                    docker run -d --name grafana ${(ecoMode === true || ecoMode === 'true') ? '-m 200m --memory-swap 300m' : ''} -p ${safePort}:3000 --restart always grafana/grafana-oss:latest
                 fi
 
                 ${nginxProxyCmd}
@@ -1579,7 +1604,7 @@ EOF
                     docker restart minio
                 else
                     echo ">> Khởi chạy MinIO container (API port: ${safePort}, Console port: ${consolePort})..."
-                    docker run -d --name minio -p ${safePort}:9000 -p ${consolePort}:9001 --restart always -v minio_data:/data minio/minio server /data --console-address ":9001"
+                    docker run -d --name minio ${(ecoMode === true || ecoMode === 'true') ? '-m 250m --memory-swap 350m' : ''} -p ${safePort}:9000 -p ${consolePort}:9001 --restart always -v minio_data:/data minio/minio server /data --console-address ":9001"
                 fi
 
                 ${nginxProxyCmd}

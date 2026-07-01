@@ -23,7 +23,8 @@ import {
   Webhook,
   ChevronDown,
   ChevronRight,
-  Cloud
+  Cloud,
+  HelpCircle
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -83,7 +84,8 @@ export default function Sidebar() {
         { id: 'backups', label: 'Sao lưu & Đám mây', icon: Cloud },
         { id: 'scripts', label: 'Chạy Scripts', icon: TerminalSquare },
         { id: 'webhooks', label: 'Git Webhooks', icon: Webhook },
-        { id: 'maintenance', label: 'Bảo trì hệ thống', icon: Wrench }
+        { id: 'maintenance', label: 'Bảo trì hệ thống', icon: Wrench },
+        { id: 'guides', label: 'Tài liệu & Tối ưu', icon: HelpCircle }
       ]
     }
   ];

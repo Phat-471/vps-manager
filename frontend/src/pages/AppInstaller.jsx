@@ -498,6 +498,7 @@ export default function AppInstaller() {
   const [pmaPassword, setPmaPassword] = useState(() => Math.random().toString(36).substring(2, 12));
 
   // Install states
+  const [ecoMode, setEcoMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [installFailed, setInstallFailed] = useState(false);
@@ -634,6 +635,7 @@ export default function AppInstaller() {
     setPmaUser('pma_admin');
     setPmaPassword(Math.random().toString(36).substring(2, 12));
     setShowPmaForm(false);
+    setEcoMode(false);
   };
 
   const handleBack = () => {
@@ -649,7 +651,7 @@ export default function AppInstaller() {
     setLogs(`>> [${new Date().toLocaleTimeString()}] Đang chuẩn bị cài đặt ${selectedService.name} v${selectedVersion}...\n`);
     try {
       const activeTab = selectedService.id;
-      const payload = { appId: activeTab, version: selectedVersion };
+      const payload = { appId: activeTab, version: selectedVersion, ecoMode };
       if (['wordpress','laravel'].includes(activeTab)) {
         payload.domain = domain.trim(); payload.email = email.trim();
         payload.siteTitle = siteTitle.trim(); payload.adminUser = adminUser.trim();
@@ -1202,6 +1204,25 @@ export default function AppInstaller() {
                     </div>
                   </>
                 )}
+
+                {/* Eco / Full Mode Toggle */}
+                <div style={{ padding: 12, background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', display: 'block' }}>Chế độ cài đặt</span>
+                      <span style={{ fontSize: 10, color: '#64748b' }}>Tối ưu RAM & Tài nguyên cho VPS yếu (dưới 2GB RAM)</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {['full', 'eco'].map(m => (
+                        <button key={m} type="button" onClick={() => setEcoMode(m === 'eco')} disabled={running}
+                          className={`btn btn-xs ${((m === 'eco' && ecoMode) || (m === 'full' && !ecoMode)) ? 'btn-primary' : 'btn-secondary'}`}
+                          style={{ padding: '4px 10px', fontSize: 10 }}>
+                          {m === 'full' ? 'Đầy đủ (Full)' : 'Tối ưu (Eco)'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
 
                 {/* Submit / Stop */}
                 <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
