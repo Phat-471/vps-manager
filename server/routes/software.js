@@ -31,6 +31,11 @@ router.post('/install-ufw', SoftwareController.installUFW);
 router.post('/install-supervisor', SoftwareController.installSupervisor);
 router.post('/install-rclone', SoftwareController.installRclone);
 router.post('/install-netdata', SoftwareController.installNetdata);
+router.post('/install-vsftpd', SoftwareController.installVsftpd);
+router.post('/install-phpmyadmin', SoftwareController.installPhpMyAdmin);
+router.post('/install-portainer', SoftwareController.installPortainer);
+router.post('/install-memcached', SoftwareController.installMemcached);
+router.post('/install-postfix', SoftwareController.installPostfix);
 router.post('/installed', SoftwareController.getInstalledSoftware);
 router.post('/uninstall', SoftwareController.uninstallSoftware);
 

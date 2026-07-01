@@ -21,30 +21,45 @@ export default function Maintenance() {
   const [updateStatus, setUpdateStatus] = useState({ checked: false, hasUpdate: false, currentVersion: '', latestVersion: '', changelog: [] });
   const [checkingUpdate, setCheckingUpdate] = useState(false);
 
+  // Categories & UI Filtering
+  const [activeCategory, setActiveCategory] = useState('all');
+
   const softwareList = [
-    { key: 'lemp', name: 'LEMP Stack (Nginx, MySQL, PHP)', desc: 'Bộ khung chạy web PHP hoàn chỉnh', installEndpoint: '/api/software/install-lemp' },
-    { key: 'nginx', name: 'Nginx Web Server', desc: 'Máy chủ Web và Reverse Proxy nhẹ, hiệu năng cao', installEndpoint: '/api/software/install-nginx' },
-    { key: 'mysql', name: 'MySQL Database Server', desc: 'Cơ sở dữ liệu quan hệ SQL mạnh mẽ', installEndpoint: '/api/software/install-mysql' },
-    { key: 'php', name: 'PHP-FPM Engine', desc: 'Bộ xử lý script PHP FastCGI chạy web', installEndpoint: '/api/software/install-php' },
-    { key: 'apache', name: 'Apache Web Server', desc: 'Máy chủ Web HTTP truyền thống và ổn định', installEndpoint: '/api/software/install-apache' },
-    { key: 'nodejs', name: 'Node.js Engine', desc: 'Môi trường thực thi Javascript phía máy chủ', installEndpoint: '/api/software/install-nodejs', hasVersion: true },
-    { key: 'docker', name: 'Docker Engine', desc: 'Trình quản lý container mã nguồn mở', installEndpoint: '/api/software/install-docker' },
-    { key: 'java', name: 'Java OpenJDK 17', desc: 'Môi trường phát triển & chạy Java (Minecraft Server...)', installEndpoint: '/api/software/install-java' },
-    { key: 'python', name: 'Python 3', desc: 'Môi trường chạy các ứng dụng script Python & pip', installEndpoint: '/api/software/install-python' },
-    { key: 'redis', name: 'Redis Server', desc: 'Cơ sở dữ liệu lưu trữ in-memory cache tốc độ cao', installEndpoint: '/api/software/install-redis' },
-    { key: 'mongodb', name: 'MongoDB Server', desc: 'Cơ sở dữ liệu NoSQL dạng văn bản JSON', installEndpoint: '/api/software/install-mongodb' },
-    { key: 'postgresql', name: 'PostgreSQL Server', desc: 'Hệ quản trị cơ sở dữ liệu quan hệ mạnh mẽ', installEndpoint: '/api/software/install-postgresql' },
-    { key: 'golang', name: 'Golang compiler', desc: 'Môi trường chạy và biên dịch Go', installEndpoint: '/api/software/install-golang' },
-    { key: 'fail2ban', name: 'Fail2ban Defender', desc: 'Ngăn chặn tấn công brute-force SSH & quét cổng', installEndpoint: '/api/software/install-fail2ban' },
-    { key: 'pm2', name: 'PM2 Process Manager', desc: 'Quản lý tiến trình ứng dụng NodeJS', installEndpoint: '/api/software/install-pm2' },
-    { key: 'git', name: 'Git Version Control', desc: 'Hệ thống quản lý phiên bản mã nguồn', installEndpoint: '/api/software/install-git' },
-    { key: 'certbot', name: 'Certbot SSL (Let\'s Encrypt)', desc: 'Tự động tạo và gia hạn chứng chỉ SSL miễn phí', installEndpoint: '/api/software/install-certbot' },
-    { key: 'composer', name: 'Composer PHP', desc: 'Bộ quản lý thư viện dependency cho PHP', installEndpoint: '/api/software/install-composer' },
-    { key: 'rsync', name: 'Rsync File Sync', desc: 'Đồng bộ và sao chép tệp tin tốc độ cao, an toàn', installEndpoint: '/api/software/install-rsync' },
-    { key: 'ufw', name: 'UFW Firewall', desc: 'Công cụ tường lửa đơn giản bảo vệ cổng kết nối VPS', installEndpoint: '/api/software/install-ufw' },
-    { key: 'supervisor', name: 'Supervisor Manager', desc: 'Quản lý và giám sát các tiến trình chạy ngầm', installEndpoint: '/api/software/install-supervisor' },
-    { key: 'rclone', name: 'Rclone Sync', desc: 'Đồng bộ dữ liệu VPS lên Google Drive, OneDrive,...', installEndpoint: '/api/software/install-rclone' },
-    { key: 'netdata', name: 'Netdata Monitor', desc: 'Giám sát hệ thống thời gian thực qua giao diện web trực quan', installEndpoint: '/api/software/install-netdata' }
+    // Web Servers & Stacks
+    { key: 'lemp', name: 'LEMP Stack (Nginx, MySQL, PHP)', desc: 'Bộ khung chạy web PHP hoàn chỉnh', installEndpoint: '/api/software/install-lemp', category: 'web' },
+    { key: 'nginx', name: 'Nginx Web Server', desc: 'Máy chủ Web và Reverse Proxy nhẹ, hiệu năng cao', installEndpoint: '/api/software/install-nginx', category: 'web' },
+    { key: 'apache', name: 'Apache Web Server', desc: 'Máy chủ Web HTTP truyền thống và ổn định', installEndpoint: '/api/software/install-apache', category: 'web' },
+    { key: 'certbot', name: 'Certbot SSL (Let\'s Encrypt)', desc: 'Tự động tạo và gia hạn chứng chỉ SSL miễn phí', installEndpoint: '/api/software/install-certbot', category: 'web' },
+    { key: 'phpmyadmin', name: 'phpMyAdmin', desc: 'Giao diện quản lý CSDL MySQL/MariaDB qua trình duyệt', installEndpoint: '/api/software/install-phpmyadmin', category: 'web' },
+
+    // Databases
+    { key: 'mysql', name: 'MySQL Database Server', desc: 'Cơ sở dữ liệu quan hệ SQL mạnh mẽ', installEndpoint: '/api/software/install-mysql', category: 'db' },
+    { key: 'redis', name: 'Redis Server', desc: 'Cơ sở dữ liệu lưu trữ in-memory cache tốc độ cao', installEndpoint: '/api/software/install-redis', category: 'db' },
+    { key: 'mongodb', name: 'MongoDB Server', desc: 'Cơ sở dữ liệu NoSQL dạng văn bản JSON', installEndpoint: '/api/software/install-mongodb', category: 'db' },
+    { key: 'postgresql', name: 'PostgreSQL Server', desc: 'Hệ quản trị cơ sở dữ liệu quan hệ mạnh mẽ', installEndpoint: '/api/software/install-postgresql', category: 'db' },
+    { key: 'memcached', name: 'Memcached Server', desc: 'Hệ thống cache bộ nhớ đệm đối tượng hiệu năng cao', installEndpoint: '/api/software/install-memcached', category: 'db' },
+
+    // Runtimes & Compilers
+    { key: 'php', name: 'PHP-FPM Engine', desc: 'Bộ xử lý script PHP FastCGI chạy web PHP', installEndpoint: '/api/software/install-php', category: 'runtime' },
+    { key: 'nodejs', name: 'Node.js Engine', desc: 'Môi trường thực thi Javascript phía máy chủ', installEndpoint: '/api/software/install-nodejs', category: 'runtime', hasVersion: true },
+    { key: 'java', name: 'Java OpenJDK 17', desc: 'Môi trường phát triển & chạy Java (Minecraft, Web Apps...)', installEndpoint: '/api/software/install-java', category: 'runtime' },
+    { key: 'python', name: 'Python 3', desc: 'Môi trường chạy các ứng dụng script Python & pip', installEndpoint: '/api/software/install-python', category: 'runtime' },
+    { key: 'golang', name: 'Golang compiler', desc: 'Môi trường chạy và biên dịch ngôn ngữ Go', installEndpoint: '/api/software/install-golang', category: 'runtime' },
+    { key: 'composer', name: 'Composer PHP', desc: 'Bộ quản lý thư viện dependency cho PHP', installEndpoint: '/api/software/install-composer', category: 'runtime' },
+
+    // Utilities & Security
+    { key: 'docker', name: 'Docker Engine', desc: 'Trình quản lý container mã nguồn mở', installEndpoint: '/api/software/install-docker', category: 'utility' },
+    { key: 'portainer', name: 'Portainer CE', desc: 'Giao diện Web UI quản lý Docker Container trực quan', installEndpoint: '/api/software/install-portainer', category: 'utility' },
+    { key: 'fail2ban', name: 'Fail2ban Defender', desc: 'Ngăn chặn tấn công brute-force SSH & quét cổng', installEndpoint: '/api/software/install-fail2ban', category: 'utility' },
+    { key: 'pm2', name: 'PM2 Process Manager', desc: 'Quản lý tiến trình ứng dụng NodeJS chạy ngầm', installEndpoint: '/api/software/install-pm2', category: 'utility' },
+    { key: 'git', name: 'Git Version Control', desc: 'Hệ thống quản lý phiên bản mã nguồn', installEndpoint: '/api/software/install-git', category: 'utility' },
+    { key: 'rsync', name: 'Rsync File Sync', desc: 'Đồng bộ và sao chép tệp tin tốc độ cao, an toàn', installEndpoint: '/api/software/install-rsync', category: 'utility' },
+    { key: 'ufw', name: 'UFW Firewall', desc: 'Công cụ tường lửa đơn giản bảo vệ cổng kết nối VPS', installEndpoint: '/api/software/install-ufw', category: 'utility' },
+    { key: 'supervisor', name: 'Supervisor Manager', desc: 'Quản lý và giám sát các tiến trình chạy ngầm', installEndpoint: '/api/software/install-supervisor', category: 'utility' },
+    { key: 'rclone', name: 'Rclone Sync', desc: 'Đồng bộ dữ liệu VPS lên Google Drive, OneDrive,...', installEndpoint: '/api/software/install-rclone', category: 'utility' },
+    { key: 'netdata', name: 'Netdata Monitor', desc: 'Giám sát hệ thống thời gian thực qua giao diện web trực quan', installEndpoint: '/api/software/install-netdata', category: 'utility' },
+    { key: 'vsftpd', name: 'vsftpd FTP Server', desc: 'Dịch vụ truyền tải tệp tin FTP nhanh và bảo mật', installEndpoint: '/api/software/install-vsftpd', category: 'utility' },
+    { key: 'postfix', name: 'Postfix Mail Transfer', desc: 'Dịch vụ gửi nhận thư điện tử SMTP cơ bản', installEndpoint: '/api/software/install-postfix', category: 'utility' }
   ];
 
   useEffect(() => {
@@ -437,74 +452,138 @@ export default function Maintenance() {
 
       {/* One click software installers */}
       <div className="card-glass p-6 rounded-xl space-y-4">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <ShieldCheck size={18} className="text-indigo-400" />
-          Cài đặt ứng dụng 1-click
-        </h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <ShieldCheck size={18} className="text-indigo-400" />
+            Cài đặt ứng dụng & Dịch vụ 1-click
+          </h2>
+          <div style={{ display: 'flex', gap: '6px', background: 'rgba(0,0,0,0.2)', padding: '4px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            {[
+              { id: 'all', label: 'Tất cả' },
+              { id: 'web', label: 'Web & Stacks' },
+              { id: 'db', label: 'Cơ sở dữ liệu' },
+              { id: 'runtime', label: 'Môi trường chạy' },
+              { id: 'utility', label: 'Hệ thống & Tiện ích' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveCategory(tab.id)}
+                className={`btn btn-xs ${activeCategory === tab.id ? 'btn-primary' : 'btn-glass'}`}
+                style={{ padding: '6px 12px', fontSize: '11px', border: 'none' }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
         
         {loading ? (
           <div className="text-center py-8 text-gray-400">Đang quét phần mềm đã cài đặt trên VPS...</div>
         ) : (
           <div className="service-grid">
-            {softwareList.map((soft) => {
-              const nameMap = {
-                lemp: 'nginx',
-                python: 'python3',
-                mongodb: 'mongod',
-                postgresql: 'psql',
-                apache: 'apache2',
-                golang: 'go',
-                fail2ban: 'fail2ban-client'
-              };
-              const systemKey = nameMap[soft.key] || soft.key;
-              const status = installedSoftware[systemKey];
-              const isInstalled = status?.installed;
-              const version = getCleanVersion(status?.version);
+            {softwareList
+              .filter(soft => activeCategory === 'all' || soft.category === activeCategory)
+              .map((soft) => {
+                const nameMap = {
+                  lemp: 'nginx',
+                  python: 'python3',
+                  mongodb: 'mongod',
+                  postgresql: 'psql',
+                  apache: 'apache2',
+                  golang: 'go',
+                  fail2ban: 'fail2ban-client'
+                };
+                const systemKey = nameMap[soft.key] || soft.key;
+                const status = installedSoftware[systemKey];
+                const isInstalled = status?.installed;
+                const version = getCleanVersion(status?.version);
 
-              return (
-                <div key={soft.key} className="service-card p-5">
-                  {isInstalled && (
-                    <span className="absolute top-4 right-4 status-badge success">
-                      Installed
-                    </span>
-                  )}
-                  {!isInstalled && (
-                    <span className="absolute top-4 right-4 status-badge" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
-                      Chưa có
-                    </span>
-                  )}
-                  
-                  <div className="service-header mb-2">
-                    <span className="font-semibold text-gray-200 font-outfit" style={{ fontSize: '15px' }}>{soft.name}</span>
-                  </div>
-                  <p className="service-info text-xs text-gray-400 leading-relaxed mb-4 flex-1">{soft.desc}</p>
-                  
-                  {isInstalled && version && (
-                    <span className="text-[10px] block font-mono text-indigo-400 mb-3">Phiên bản: {version}</span>
-                  )}
+                const catColors = {
+                  web: '#a855f7',
+                  db: '#06b6d4',
+                  runtime: '#f97316',
+                  utility: '#f43f5e'
+                };
+                const catNames = {
+                  web: 'Web Server',
+                  db: 'Database',
+                  runtime: 'Runtime',
+                  utility: 'Hệ thống'
+                };
 
-                  <div className="mt-auto">
-                    <button
-                      onClick={() => handleInstallSoftware(soft)}
-                      disabled={isInstalled || installingKey !== null}
-                      className={`btn btn-block ${isInstalled ? 'btn-secondary text-gray-500 cursor-not-allowed' : 'btn-primary'}`}
-                      style={{ padding: '6px' }}
-                    >
-                      {installingKey === soft.key ? (
-                        <>
-                          <RefreshCw size={12} className="animate-spin" />
-                          Đang cài đặt...
-                        </>
-                      ) : isInstalled ? (
-                        'Đã sẵn sàng'
+                return (
+                  <div key={soft.key} className="service-card p-5" style={{ display: 'flex', flexDirection: 'column', borderLeft: `3px solid ${catColors[soft.category] || 'rgba(255,255,255,0.1)'}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: `${catColors[soft.category]}15`, color: catColors[soft.category], border: `1px solid ${catColors[soft.category]}25` }}>
+                        {catNames[soft.category]}
+                      </span>
+                      {isInstalled ? (
+                        <span className="status-badge success text-[10px]">
+                          Active
+                        </span>
                       ) : (
-                        'Cài đặt ngay'
+                        <span className="status-badge text-[10px]" style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)' }}>
+                          Chưa cài
+                        </span>
                       )}
-                    </button>
+                    </div>
+                    
+                    <div className="service-header mb-1">
+                      <span className="font-semibold text-gray-200 font-outfit" style={{ fontSize: '14px' }}>{soft.name}</span>
+                    </div>
+                    <p className="service-info text-[11px] text-gray-400 leading-relaxed mb-3 flex-1">{soft.desc}</p>
+                    
+                    {isInstalled && version && (
+                      <span className="text-[10px] block font-mono text-indigo-400 mb-3">Phiên bản: {version}</span>
+                    )}
+
+                    <div className="mt-auto" style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        onClick={() => handleInstallSoftware(soft)}
+                        disabled={isInstalled || installingKey !== null}
+                        className={`btn btn-block ${isInstalled ? 'btn-secondary text-gray-500 cursor-not-allowed' : 'btn-primary'}`}
+                        style={{ padding: '6px', fontSize: '11px', flex: 1 }}
+                      >
+                        {installingKey === soft.key ? (
+                          <>
+                            <RefreshCw size={12} className="animate-spin" />
+                            Cài đặt...
+                          </>
+                        ) : isInstalled ? (
+                          'Đã sẵn sàng'
+                        ) : (
+                          'Cài đặt'
+                        )}
+                      </button>
+                      {isInstalled && (
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm(`Bạn có chắc chắn muốn gỡ cài đặt hoàn toàn ${soft.name}? Thao tác này có thể làm mất dữ liệu.`)) return;
+                            setInstallingKey(soft.key);
+                            try {
+                              showToast(`Đang gỡ cài đặt ${soft.name}...`, 'info');
+                              const res = await apiCall('/api/software/uninstall', 'POST', { softwareId: soft.key });
+                              if (res.success) {
+                                showToast(res.message, 'success');
+                                fetchSystemDetails();
+                              }
+                            } catch (err) {
+                              console.error(err);
+                            } finally {
+                              setInstallingKey(null);
+                            }
+                          }}
+                          disabled={installingKey !== null}
+                          className="btn btn-danger text-xs"
+                          style={{ padding: '6px 10px', fontSize: '11px' }}
+                        >
+                          Gỡ
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         )}
       </div>

@@ -548,14 +548,20 @@ async function getInstalledSoftware(req, res) {
             { name: 'ufw', command: 'ufw --version | head -1' },
             { name: 'supervisord', command: 'supervisord -v 2>&1' },
             { name: 'rclone', command: 'rclone --version | head -1' },
-            { name: 'netdata', command: 'netdata -V 2>&1' }
+            { name: 'netdata', command: 'netdata -V 2>&1' },
+            { name: 'vsftpd', command: 'vsftpd -v 2>&1 | head -1' },
+            { name: 'phpmyadmin', command: 'test -d /usr/share/phpmyadmin && echo "installed"', skipWhich: true },
+            { name: 'portainer', command: 'docker ps -a --filter name=portainer --format "{{.Names}}" 2>&1', skipWhich: true },
+            { name: 'memcached', command: 'memcached -h 2>&1 | head -1' },
+            { name: 'postfix', command: 'postconf -d mail_version 2>&1 | head -1' }
         ];
 
         // Check all software in parallel
         for (const check of checks) {
             try {
-                const result = await ssh.executeCommand(`which ${check.name} && ${check.command}`);
-                if (result.stdout && !result.stdout.includes('not found')) {
+                const cmdStr = check.skipWhich ? check.command : `which ${check.name} && ${check.command}`;
+                const result = await ssh.executeCommand(cmdStr);
+                if (result.stdout && !result.stdout.includes('not found') && result.stdout.trim() !== '') {
                     installed[check.name] = {
                         installed: true,
                         version: result.stdout.trim()
@@ -598,7 +604,12 @@ async function getInstalledSoftware(req, res) {
             ufw: installed.ufw?.installed,
             supervisor: installed.supervisord?.installed,
             rclone: installed.rclone?.installed,
-            netdata: installed.netdata?.installed
+            netdata: installed.netdata?.installed,
+            vsftpd: installed.vsftpd?.installed,
+            phpmyadmin: installed.phpmyadmin?.installed,
+            portainer: installed.portainer?.installed,
+            memcached: installed.memcached?.installed,
+            postfix: installed.postfix?.installed
         };
 
         res.json({
@@ -851,7 +862,12 @@ async function uninstallSoftware(req, res) {
             ufw: 'apt-get purge -y ufw && apt-get autoremove -y',
             supervisor: 'apt-get purge -y supervisor && apt-get autoremove -y',
             rclone: 'rm -f /usr/bin/rclone /usr/local/bin/rclone /usr/share/man/man1/rclone.1',
-            netdata: 'wget -O /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh && sh /tmp/netdata-kickstart.sh --uninstall --non-interactive || apt-get purge -y netdata'
+            netdata: 'wget -O /tmp/netdata-kickstart.sh https://get.netdata.cloud/kickstart.sh && sh /tmp/netdata-kickstart.sh --uninstall --non-interactive || apt-get purge -y netdata',
+            vsftpd: 'apt-get purge -y vsftpd && apt-get autoremove -y',
+            phpmyadmin: 'apt-get purge -y phpmyadmin && rm -rf /usr/share/phpmyadmin /var/www/html/phpmyadmin && apt-get autoremove -y',
+            portainer: 'docker stop portainer && docker rm portainer && docker volume rm portainer_data',
+            memcached: 'apt-get purge -y memcached && apt-get autoremove -y',
+            postfix: 'apt-get purge -y postfix && apt-get autoremove -y'
         };
 
         const cmd = uninstallCmds[softwareId];
@@ -866,6 +882,97 @@ async function uninstallSoftware(req, res) {
             message: `Đã gỡ cài đặt ${softwareId} thành công`,
             output: result.stdout || result.stderr
         });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installVsftpd(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y vsftpd
+            systemctl enable vsftpd
+            systemctl start vsftpd
+            vsftpd -v 2>&1 | head -1
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt vsftpd FTP Server thành công', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installPhpMyAdmin(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            apt-get update
+            echo "phpmyadmin phpmyadmin/dbconfig-install boolean false" | debconf-set-selections
+            echo "phpmyadmin phpmyadmin/reconfigure-webconfig select nginx" | debconf-set-selections
+            DEBIAN_FRONTEND=noninteractive apt-get install -y phpmyadmin
+            ln -sf /usr/share/phpmyadmin /var/www/html/phpmyadmin
+            echo "phpMyAdmin installed to /var/www/html/phpmyadmin"
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt phpMyAdmin thành công (Truy cập tại http://<IP_VPS>/phpmyadmin)', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installPortainer(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            docker volume create portainer_data
+            docker run -d -p 9000:9000 --name portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:latest
+            docker ps | grep portainer
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt Portainer thành công (Truy cập cổng :9000)', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installMemcached(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y memcached libmemcached-tools
+            systemctl enable memcached
+            systemctl start memcached
+            memcached -h | head -1
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt Memcached thành công', output: result.stdout });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+}
+
+async function installPostfix(req, res) {
+    try {
+        const { vpsConfig } = req.body;
+        const ssh = await connectionPool.getConnection(vpsConfig.id, vpsConfig);
+        const cmd = `
+            apt-get update
+            echo "postfix postfix/mailname string localhost" | debconf-set-selections
+            echo "postfix postfix/main_mailer_type select 'Local only'" | debconf-set-selections
+            DEBIAN_FRONTEND=noninteractive apt-get install -y postfix
+            systemctl enable postfix
+            systemctl start postfix
+            postconf -d mail_version
+        `;
+        const result = await ssh.executeCommand(cmd);
+        res.json({ success: true, message: 'Đã cài đặt Postfix Mail Server thành công', output: result.stdout });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -899,5 +1006,10 @@ module.exports = {
     installSupervisor,
     installRclone,
     installNetdata,
+    installVsftpd,
+    installPhpMyAdmin,
+    installPortainer,
+    installMemcached,
+    installPostfix,
     uninstallSoftware
 };
